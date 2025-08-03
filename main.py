@@ -135,13 +135,16 @@ class AnkiHelper:
 
 if __name__ == '__main__':
     # Configuration
-    FOLDER_PATH = input("Enter the path to your markdown folder: ").strip() or 'files2'
-    DECK_NAME = input("Enter the Anki deck name (or press Enter for 'D'): ").strip() or "nuevas_notas2"
+    default_folder = './files3'
+    FOLDER_PATH = input(f"Enter the path to your markdown folder (or press enter to use '{default_folder}'): ").strip() or default_folder
+    default_deck = "nuevas_notas2"
+    DECK_NAME = input(f"Enter the Anki deck name (or press Enter for '{default_deck}'): ").strip() or default_deck
 
     ah = AnkiHelper(folder_path=FOLDER_PATH, deck_name=DECK_NAME)
+
     # Check AnkiConnect connection
     if not ah.check_anki_connection():
-        exit(1)
+        raise ConnectionError("Failed to connect to AnkiConnect. Please ensure Anki is running with the AnkiConnect add-on installed.")
 
     # Process the folder
     ah.run()
