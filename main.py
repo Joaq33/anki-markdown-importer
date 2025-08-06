@@ -3,12 +3,20 @@ import re
 import time
 from dataclasses import dataclass
 from dataclasses import field
-
+# import logging as log
+# import structlog
+from loguru import logger as log
 import markdown
 import requests
 import frontmatter
-from icecream import ic
 
+log.add(sink='./anki_helper.log', level='DEBUG', rotation='10 MB', retention='10 days',)
+# from icecream import ic
+# log = structlog.get_logger()
+DEFAULT_FOLDER_PATH = './files2'
+DEFAULT_DECK_NAME = "pruebas_notas_import"
+
+# log.basicConfig(level=log.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 @dataclass
 class Card:
@@ -16,6 +24,7 @@ class Card:
     back: str = ""
     frontmatter: dict[str, list[str]] = None
     raw_content: str = ""
+    should_skip: bool = False
     tags: set[str] = field(default_factory=set)
 
     def __repr__(self):
@@ -26,13 +35,15 @@ class Card:
 class AnkiHelper:
     not_included_tag = 'not_included'
 
-    def __init__(self, folder_path="./files", deck_name="Default", host='http://localhost', port='8765'):
+    def __init__(self, folder_path="./files", deck_name="Default", host='http://localhost', port='8765',
+                 skip_submission=False):
         self.folder_path = folder_path
         self.deck_name = deck_name
         self.url = host + ':' + port
         self.success_count = 0
         self.failed_count = 0
         self.skipped_count = 0
+        self.skip_submission = skip_submission  # Feature flag to skip submission
 
         self._check_folder_existance()
 
@@ -42,14 +53,31 @@ class AnkiHelper:
             payload = {"action": "version", "version": 6}
             response = requests.post(self.url, json=payload)
             result = response.json()
-            print(f"AnkiConnect version: {result.get('result', 'Unknown')}")
+            log.info(f"AnkiConnect version: {result.get('result', 'Unknown')}")
             return True
         except requests.exceptions.RequestException:
-            print("Error: Cannot connect to AnkiConnect. Make sure Anki is running with AnkiConnect add-on installed.")
+            log.error("Cannot connect to AnkiConnect. Make sure Anki is running with AnkiConnect add-on installed.")
             return False
         except Exception as e:
-            print(f"Unexpected error while checking AnkiConnect: {e}")
+            log.exception(f"Unexpected error while checking AnkiConnect: {e}")
             return False
+
+    def process_card_submission(self, card: Card) -> str:
+        """
+        Process the card submission to Anki.
+        """
+        log.debug(f"Processing card: {card}")
+        if card.should_skip:
+            log.info(f"Skipping card '{card.front}' due to 'should_skip' flag.")
+            return 'SKIPPED'
+
+        if self.skip_submission:
+            log.info(f"Skipping submission for card '{card.front}' due to 'skip_submission' flag.")
+            return 'SKIPPED'
+        response = self.post_card_to_deck(card)
+        if response:
+            return 'SUCCESS'
+        return 'FAILED'
 
     def post_card_to_deck(self, card: Card) -> bool:
         payload = {
@@ -67,16 +95,15 @@ class AnkiHelper:
             }
         }
 
-        # return True  # # Placeholder for the actual implementation
         try:
             response = requests.post(self.url, json=payload)
             result = response.json()
 
             if result.get('error'):
-                print(f"Error adding note '{card}': {result['error']}")
+                log.error(f"Error adding note '{card}': {result['error']}")
                 return False
             else:
-                print(f"Successfully added note: {card}")
+                log.info(f"Successfully added note: {card}")
                 return True
 
         except requests.exceptions.RequestException as e:
@@ -103,18 +130,18 @@ class AnkiHelper:
 
         if not card.tags:
             card.tags.add('default')
-        ic(card.tags)
+        # ic(filename, card.tags)  # todo remove logging
 
         if self.not_included_tag in card.tags:
-            print(f"Skipping file '{filename}' due to '{self.not_included_tag}' tag.")
-            return 'SKIPPED'
+            log.info(f"Skipping file '{filename}' due to '{self.not_included_tag}' tag.")
+            card.front = filename
+            card.back = "This note is skipped due to the 'not_included' tag."
+            card.should_skip = True
+            return card
 
         card.front = os.path.splitext(filename)[0]  # Use filename without extension as front of card
         card.back = self.md_to_html_parser(content)  # Convert markdown content to HTML for the back of the card
-        if self.post_card_to_deck(card=card):
-            return 'SUCCESS'
-        else:
-            return 'FAILED'
+        return card
 
     def run(self) -> None:
         """Process all markdown files in the specified folder"""
@@ -123,10 +150,10 @@ class AnkiHelper:
         md_files = self.get_all_md_in_folder(self.folder_path)
 
         if not md_files:
-            print(f"No markdown files found in '{self.folder_path}'")
+            log.warning(f"No markdown files found in '{self.folder_path}'")
             return
 
-        print(f"Found {len(md_files)} markdown files to process...")
+        log.info(f"Found {len(md_files)} markdown files to process...")
 
         # success_count = 0
         # failed_count = 0
@@ -140,7 +167,9 @@ class AnkiHelper:
                 with open(file_path, 'r', encoding='utf-8') as file:
                     content = file.read()
 
-                response = self.create_card(filename, content)
+                card = self.create_card(filename, content)
+                response = self.process_card_submission(card)
+
                 match response:
                     case 'SUCCESS':
                         self.success_count += 1
@@ -149,18 +178,18 @@ class AnkiHelper:
                     case 'SKIPPED':
                         self.skipped_count += 1
 
-
                 # Small delay to avoid overwhelming AnkiConnect
-                time.sleep(0.1)
+                if not self.skip_submission:
+                    time.sleep(0.1)
 
             except Exception as e:
-                print(f"Error processing file '{filename}': {e}")
-                failed_count += 1
+                log.error(f"Error processing file '{filename}': {e}")
+                self.failed_count += 1
 
-        print(f"\nProcessing complete!")
-        print(f"Successfully added: {success_count} notes")
-        print(f"Failed: {failed_count} notes")
-        print(f"Skipped: {skipped_count} notes")
+        log.info(f"\nProcessing complete!")
+        log.info(f"Successfully added: {self.success_count} notes")
+        log.info(f"Failed: {self.failed_count} notes")
+        log.info(f"Skipped: {self.skipped_count} notes")
 
     def _check_folder_existance(self):
         # Check if folder exists
@@ -188,16 +217,14 @@ class AnkiHelper:
 
 if __name__ == '__main__':
     # Configuration
-    default_folder = './files2'
     # FOLDER_PATH = input(
     #     f"Enter the path to your markdown folder (or press enter to use '{default_folder}'): ").strip() or default_folder
-    default_deck = "nuevas_notas2"
-    # DECK_NAME = input(f"Enter the Anki deck name (or press Enter for '{default_deck}'): ").strip() or default_deck
+    # DECK_NAME = input(f"Enter the Anki deck name (or press Enter for '{DEFAULT_DECK}'): ").strip() or DEFAULT_DECK
 
-    FOLDER_PATH = default_folder
-    DECK_NAME = default_deck
+    FOLDER_PATH = DEFAULT_FOLDER_PATH
+    DECK_NAME = DEFAULT_DECK_NAME
 
-    ah = AnkiHelper(folder_path=FOLDER_PATH, deck_name=DECK_NAME)
+    ah = AnkiHelper(folder_path=FOLDER_PATH, deck_name=DECK_NAME, skip_submission=False)
 
     # Check AnkiConnect connection
     if not ah.check_anki_connection():
