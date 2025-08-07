@@ -10,9 +10,6 @@ import frontmatter
 
 log.add(sink='./anki_importer.log', level='DEBUG', rotation='10 MB', retention='10 days', )
 
-DEFAULT_FOLDER_PATH = './files3'
-DEFAULT_DECK_NAME = "pruebas_notas_import"
-
 
 @dataclass
 class Card:
@@ -32,7 +29,9 @@ class AnkiHelper:
     not_included_tag = 'not_included'
 
     def __init__(self, folder_path="./files", deck_name="Default", host='http://localhost', port='8765',
-                 skip_submission=False):
+                 skip_submission=False, initial_md_files=None, mode='tree_from_flat_folder'):
+        # self.next_md_files = initial_md_files
+        # self.new_md_files = initial_md_files
         self.folder_path = folder_path
         self.deck_name = deck_name
         self.url = host + ':' + port
@@ -40,9 +39,46 @@ class AnkiHelper:
         self.failed_count = 0
         self.skipped_count = 0
         self.skip_submission = skip_submission  # Feature flag to skip submission
-        self.obsidian_links = set()  # obsidian links to other notes
+        # self.obsidian_links = set()  # obsidian links to other notes
+        self.mode = mode
 
-        self._check_folder_existance()
+        match self.mode:
+            case 'tree_from_flat_folder':
+                self.md_files_tracked = set()  # files tracked to avoid duplicates
+                self.next_md_files = []  # next markdown files to be processed helper
+                try:
+                    # self.update_md_files_trackers(initial_md_files) if initial_md_files else None
+                    for filename in initial_md_files:
+                        self.update_md_files_trackers(filename)
+                except Exception as e:
+                    log.exception(f"Error initializing markdown files trackers: {e}")
+                    raise e
+                self.new_md_files = self.next_md_files
+            case _:
+                raise NotImplementedError(
+                    f"Invalid mode '{mode}' not implemented. Supported modes: 'tree_from_flat_folder'.")
+
+        self._check_folder_existance()  # todo check file existence in the folder_path
+
+    def update_md_files_trackers(self, filename: str):
+        """
+        Update the tracker for markdown files to avoid duplicates and to manage the next files to process.
+        """
+        assert filename is not None, "filename must be provided"
+        assert isinstance(filename, str), "filename must be a string"
+        # assert filename.endswith('.md') or filename.endswith('.markdown'), "filename must be a markdown file"
+
+        # Only execute if mode is recursive
+        if self.mode in {'flat', }:
+            log.debug("Flat mode is not supported for updating markdown files trackers.")
+            return
+
+        if filename not in self.md_files_tracked:
+            self.md_files_tracked.add(filename)
+            self.next_md_files.append(filename)
+            log.info(f"Added new markdown file for processing: {filename}")
+        else:
+            log.debug(f"Markdown file '{filename}' is already tracked. No action taken.")
 
     def check_anki_connection(self) -> bool:
         """Check if AnkiConnect is available"""
@@ -152,43 +188,54 @@ class AnkiHelper:
     def run(self) -> None:
         """Process all markdown files in the specified folder"""
 
-        log.info(f"Starting to process markdown files in folder: {self.folder_path}")
+        log.info(
+            f"Starting to process markdown files in folder: {self.folder_path}")  # todo change to reference initial files instead of folder path
         log.info(f"Using Anki deck: {self.deck_name}")
-        # Get all markdown files
-        md_files = self.get_all_md_in_folder(self.folder_path)
 
-        if not md_files:
-            log.warning(f"No markdown files found in '{self.folder_path}'")
-            return
+        # # Get all markdown files using folder_path
+        # self.new_md_files = self.get_all_md_in_folder()
 
-        log.info(f"Found {len(md_files)} markdown files to process...")
+        # self.new_md_files
 
-        for filename in md_files:
-            file_path = os.path.join(self.folder_path, filename)
+        # iterate if self.new_md_files is not empty
+        while self.new_md_files:
+            self.next_md_files = []
+            for filename in self.new_md_files:
+                file_path = os.path.join(self.folder_path, f"{filename}.md" if (
+                        not filename.endswith('.md') or
+                        filename.endswith('.markdown'))
+                else filename)  # todo prevent duplicates due to .md extension. P. e. if file is already .md, do not add it again
 
-            try:
-                # Read file content
-                with open(file_path, 'r', encoding='utf-8') as file:
-                    content = file.read()
+                try:
 
-                card = self.create_card(filename, content)
-                response = self.process_card_submission(card)
+                    try:
+                        # Read file content
+                        with open(file_path, 'r', encoding='utf-8') as file:
+                            content = file.read()
+                    except FileNotFoundError:
+                        log.error(f"File '{file_path}' not found. Skipping...")
+                        continue
 
-                match response:
-                    case 'SUCCESS':
-                        self.success_count += 1
-                    case 'FAILED':
-                        self.failed_count += 1
-                    case 'SKIPPED':
-                        self.skipped_count += 1
+                    card = self.create_card(filename, content)
 
-                # Small delay to avoid overwhelming AnkiConnect
-                if not self.skip_submission:
-                    time.sleep(0.1)
+                    response = self.process_card_submission(card)
 
-            except Exception as e:
-                log.exception(f"Error processing file '{filename}': {e}")
-                self.failed_count += 1
+                    match response:
+                        case 'SUCCESS':
+                            self.success_count += 1
+                        case 'FAILED':
+                            self.failed_count += 1
+                        case 'SKIPPED':
+                            self.skipped_count += 1
+
+                    # Small delay to avoid overwhelming AnkiConnect
+                    if not self.skip_submission:
+                        time.sleep(0.1)
+
+                except Exception as e:
+                    log.exception(f"Error processing file '{filename}': {e}")
+                    self.failed_count += 1
+            self.new_md_files = self.next_md_files  # Update the list for the next iteration
 
         log.info(f"\nProcessing complete!")
         log.info(f"Successfully added: {self.success_count} notes")
@@ -202,7 +249,7 @@ class AnkiHelper:
             raise FileNotFoundError(f"Folder '{self.folder_path}' does not exist.")
 
     @staticmethod
-    def get_all_md_in_folder(folder_path) -> list[str]:
+    def _get_all_md_in_folder(folder_path) -> list[str]:
         """Get all markdown files in the specified folder"""
         return [f for f in os.listdir(folder_path) if f.lower().endswith(('.md', '.markdown'))]
 
@@ -228,7 +275,8 @@ class AnkiHelper:
             alias_match = match_split[1].strip() if len(match_split) > 1 else cleaned_match
 
             # Add the actual link to the set
-            self.obsidian_links.add(cleaned_match)
+            # self.obsidian_links.add(cleaned_match)
+            self.update_md_files_trackers(cleaned_match)
 
             # Return the alias to replace the original match with an html underline
             return f"<ins>{alias_match}</ins>"
@@ -236,7 +284,7 @@ class AnkiHelper:
         # Single pass through the content - O(n)
         content = re.sub(obsidian_link_pattern, _extract_and_replace_helper, content)
 
-        log.info(f"Found Obsidian links: {self.obsidian_links}")
+        # log.info(f"Found Obsidian links: {self.obsidian_links}")
         log.debug(f"Content modified to remove Obsidian links: {content[:100]}...")  # Log first 100 characters
 
         # Keep only the first part of the content
@@ -254,9 +302,24 @@ class AnkiHelper:
         staged_content = re.sub(image_pattern, '*__[image_placeholder]__*', staged_content)
         return staged_content
 
+    def get_all_md_in_folder(self):
+        tmp = self._get_all_md_in_folder(self.folder_path)
+
+        if not tmp:
+            log.warning(f"No markdown files found in '{self.folder_path}'")
+            return []
+
+        log.info(f"Found {len(tmp)} markdown files to process...")
+        return tmp
+
 
 if __name__ == '__main__':
+    DEFAULT_FOLDER_PATH = './files3'
+    DEFAULT_DECK_NAME = "pruebas_notas_import"
+    INITIAL_MD_FILES = ['ejemplo_nota']  # Placeholder for initial markdown files, can be set later
+
     # Configuration
+
     # FOLDER_PATH = input(
     #     f"Enter the path to your markdown folder (or press enter to use '{default_folder}'): ").strip() or default_folder
     # DECK_NAME = input(f"Enter the Anki deck name (or press Enter for '{DEFAULT_DECK}'): ").strip() or DEFAULT_DECK
@@ -264,7 +327,8 @@ if __name__ == '__main__':
     FOLDER_PATH = DEFAULT_FOLDER_PATH
     DECK_NAME = DEFAULT_DECK_NAME
 
-    ah = AnkiHelper(folder_path=FOLDER_PATH, deck_name=DECK_NAME, skip_submission=False)
+    ah = AnkiHelper(folder_path=FOLDER_PATH, deck_name=DECK_NAME, skip_submission=False,
+                    initial_md_files=INITIAL_MD_FILES)
 
     # Check AnkiConnect connection
     if not ah.check_anki_connection():
