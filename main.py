@@ -3,16 +3,13 @@ import re
 import time
 from dataclasses import dataclass
 from dataclasses import field
-# import logging as log
-# import structlog
 from loguru import logger as log
 import markdown
 import requests
 import frontmatter
 
 log.add(sink='./anki_importer.log', level='DEBUG', rotation='10 MB', retention='10 days', )
-# from icecream import ic
-# log = structlog.get_logger()
+
 DEFAULT_FOLDER_PATH = './files3'
 DEFAULT_DECK_NAME = "pruebas_notas_import"
 
