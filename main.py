@@ -10,20 +10,19 @@ import markdown
 import requests
 import frontmatter
 
-log.add(sink='./anki_helper.log', level='DEBUG', rotation='10 MB', retention='10 days',)
+log.add(sink='./anki_importer.log', level='DEBUG', rotation='10 MB', retention='10 days', )
 # from icecream import ic
 # log = structlog.get_logger()
-DEFAULT_FOLDER_PATH = './files2'
+DEFAULT_FOLDER_PATH = './files3'
 DEFAULT_DECK_NAME = "pruebas_notas_import"
 
-# log.basicConfig(level=log.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 @dataclass
 class Card:
     front: str = ""
     back: str = ""
     frontmatter: dict[str, list[str]] = None
-    raw_content: str = ""
+    staged_content: str = ""
     should_skip: bool = False
     tags: set[str] = field(default_factory=set)
 
@@ -44,6 +43,7 @@ class AnkiHelper:
         self.failed_count = 0
         self.skipped_count = 0
         self.skip_submission = skip_submission  # Feature flag to skip submission
+        self.obsidian_links = set()  # obsidian links to other notes
 
         self._check_folder_existance()
 
@@ -90,7 +90,8 @@ class AnkiHelper:
                     "fields": {
                         "Front": card.front,
                         "Back": card.back
-                    }
+                    },
+                    "tags": list(card.tags) if card.tags else [],
                 }
             }
         }
@@ -107,30 +108,33 @@ class AnkiHelper:
                 return True
 
         except requests.exceptions.RequestException as e:
-            print(f"Failed to connect to AnkiConnect: {e}")
+            log.exception(f"Failed to connect to AnkiConnect: {e}")
             return False
 
     @staticmethod
     def md_to_html_parser(md_content):
         """Convert markdown content to HTML"""
+
+        # fix ][ line breaks
+        md_content = md_content.replace(']\n[', ']<br>[')
+
         return markdown.markdown(md_content)
 
     def create_card(self, filename: str, content: str) -> Card:
         card = Card()
 
-        card.frontmatter, card.raw_content = self.separate_frontmatter(content)
+        card.frontmatter, card.staged_content = self.separate_frontmatter(content)
 
         tags_frontmatter = self.extract_tags_frontmatter(card.frontmatter)
         if tags_frontmatter:
             card.tags.update(tags_frontmatter)
 
-        tags_raw_content = self.extract_tags_raw_content(card.raw_content)
+        tags_raw_content = self.extract_tags_raw_content(card.staged_content)
         if tags_raw_content:
             card.tags.update(tags_raw_content)
 
-        if not card.tags:
-            card.tags.add('default')
-        # ic(filename, card.tags)  # todo remove logging
+        # if not card.tags:
+        #     card.tags.add('default')
 
         if self.not_included_tag in card.tags:
             log.info(f"Skipping file '{filename}' due to '{self.not_included_tag}' tag.")
@@ -140,12 +144,19 @@ class AnkiHelper:
             return card
 
         card.front = os.path.splitext(filename)[0]  # Use filename without extension as front of card
-        card.back = self.md_to_html_parser(content)  # Convert markdown content to HTML for the back of the card
+
+        card.staged_content = self.extract_and_replace_images(card.staged_content)
+        card.staged_content = self.extract_and_replace_obsidian_links(card.staged_content)
+
+        card.back = self.md_to_html_parser(
+            card.staged_content)  # Convert markdown content to HTML for the back of the card
         return card
 
     def run(self) -> None:
         """Process all markdown files in the specified folder"""
 
+        log.info(f"Starting to process markdown files in folder: {self.folder_path}")
+        log.info(f"Using Anki deck: {self.deck_name}")
         # Get all markdown files
         md_files = self.get_all_md_in_folder(self.folder_path)
 
@@ -154,10 +165,6 @@ class AnkiHelper:
             return
 
         log.info(f"Found {len(md_files)} markdown files to process...")
-
-        # success_count = 0
-        # failed_count = 0
-        # skipped_count = 0
 
         for filename in md_files:
             file_path = os.path.join(self.folder_path, filename)
@@ -183,7 +190,7 @@ class AnkiHelper:
                     time.sleep(0.1)
 
             except Exception as e:
-                log.error(f"Error processing file '{filename}': {e}")
+                log.exception(f"Error processing file '{filename}': {e}")
                 self.failed_count += 1
 
         log.info(f"\nProcessing complete!")
@@ -211,8 +218,44 @@ class AnkiHelper:
         return frontmatter.parse(content)
 
     @staticmethod
-    def extract_tags_frontmatter(frontmatter_parsed):
+    def extract_tags_frontmatter(frontmatter_parsed: dict) -> list[str] | None:
         return frontmatter_parsed['tags'] if 'tags' in frontmatter_parsed else None
+
+    def extract_and_replace_obsidian_links(self, content: str) -> str:
+        obsidian_link_pattern = r'\[\[([^\]]+)\]\]'
+
+        def _extract_and_replace_helper(match):
+            full_match = match.group(1)
+            match_split = full_match.split('|')
+            cleaned_match = match_split[0].strip()
+            alias_match = match_split[1].strip() if len(match_split) > 1 else cleaned_match
+
+            # Add the actual link to the set
+            self.obsidian_links.add(cleaned_match)
+
+            # Return the alias to replace the original match with an html underline
+            return f"<ins>{alias_match}</ins>"
+
+        # Single pass through the content - O(n)
+        content = re.sub(obsidian_link_pattern, _extract_and_replace_helper, content)
+
+        log.info(f"Found Obsidian links: {self.obsidian_links}")
+        log.debug(f"Content modified to remove Obsidian links: {content[:100]}...")  # Log first 100 characters
+
+        # Keep only the first part of the content
+        content = content.split('\n---\n', 1)[0]
+        return content
+
+    def extract_and_replace_images(self, staged_content: str) -> str:
+        """
+        placeholder for image extraction and replacement
+        extract all images in the content, it should be in the format ![alt text](image_path)
+        """
+        # Regex pattern to match image links with valid extensions
+        image_pattern = r'!\[\[([^|\]]+\.(?:png|jpg|jpeg|gif|bmp|svg|webp|tiff|tif|ico))(?:\|[^\]]*)?\]\]'
+
+        staged_content = re.sub(image_pattern, '*__[image_placeholder]__*', staged_content)
+        return staged_content
 
 
 if __name__ == '__main__':
