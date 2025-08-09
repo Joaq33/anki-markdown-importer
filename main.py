@@ -3,10 +3,16 @@ import re
 import time
 from dataclasses import dataclass
 from dataclasses import field
-from loguru import logger as log
+from typing import Optional
+
+import frontmatter
 import markdown
 import requests
-import frontmatter
+from loguru import logger as log
+import sys
+
+log.remove()
+log.add(sys.stdout, level="INFO")
 
 log.add(sink='./anki_importer.log', level='DEBUG', rotation='10 MB', retention='10 days', )
 
@@ -107,12 +113,14 @@ class AnkiHelper:
         if self.skip_submission:
             log.info(f"Skipping submission for card '{card.front}' due to 'skip_submission' flag.")
             return 'SKIPPED'
-        response = self.post_card_to_deck(card)
-        if response:
-            return 'SUCCESS'
-        return 'FAILED'
+        return self.post_card_to_deck(card)
 
-    def post_card_to_deck(self, card: Card) -> bool:
+    def post_card_to_deck(self, card: Card) -> str:
+        """
+        Post a card to the Anki deck using AnkiConnect API.
+        :param card: Card object containing front, back, tags, etc.
+        :return: 'SUCCESS', 'FAILED', or 'SKIPPED' based on the result of the operation.
+        """
         payload = {
             "action": "addNote",
             "version": 6,
@@ -134,22 +142,25 @@ class AnkiHelper:
             result = response.json()
 
             if result.get('error'):
+                if result['error'] =="cannot create note because it is a duplicate":
+                    log.warning(f"Note '{card.front}' already exists in the deck. Skipping duplicate.")
+                    return 'SKIPPED'
                 log.error(f"Error adding note '{card}': {result['error']}")
-                return False
+                return 'FAILED'
             else:
                 log.info(f"Successfully added note: {card}")
-                return True
+                return 'SUCCESS'
 
         except requests.exceptions.RequestException as e:
             log.exception(f"Failed to connect to AnkiConnect: {e}")
-            return False
+            return 'FAILED'
 
     @staticmethod
     def md_to_html_parser(md_content):
         """Convert markdown content to HTML"""
 
         # fix ][ line breaks
-        md_content = md_content.replace(']\n[', ']<br>[')
+        md_content = md_content.replace('\n', '<br>')
 
         return markdown.markdown(md_content)
 
@@ -185,6 +196,32 @@ class AnkiHelper:
             card.staged_content)  # Convert markdown content to HTML for the back of the card
         return card
 
+    def read_file_case_insensitive_simple(self, filename: str, directory: str) -> Optional[
+        str]:
+        """
+        Simpler version using os.listdir() - good for smaller directories.
+        """
+        try:
+            files = os.listdir(directory)
+            filename_lower = filename.lower()
+            log.debug(f'files in directory {directory}:')
+            log.debug(files)
+            log.debug(f'Looking for file: {filename_lower}')
+            for file in files:
+                name, ext = os.path.splitext(file)
+
+                if ext in ('.md', '.markdown') and name.lower() == filename_lower:
+                    filepath = os.path.join(directory, file)
+                    if os.path.isfile(filepath):
+                        with open(filepath, 'r', encoding="utf-8") as f:
+                            return f.read()
+                    else:
+                        raise IOError(f"File '{file}' is not a regular file.")
+        except (OSError, IOError) as e:
+            raise IOError(f"Error accessing directory or file: {e}")
+        raise FileNotFoundError(
+            f"Markdown file '{filename}' not found in directory '{directory}'. Please check the filename and directory path.")
+
     def run(self) -> None:
         """Process all markdown files in the specified folder"""
 
@@ -207,13 +244,14 @@ class AnkiHelper:
                 else filename)  # todo prevent duplicates due to .md extension. P. e. if file is already .md, do not add it again
 
                 try:
-
                     try:
                         # Read file content
-                        with open(file_path, 'r', encoding='utf-8') as file:
-                            content = file.read()
+                        # with open(file_path, 'r', encoding='utf-8') as file:
+                        #     content = file.read()
+                        content = self.read_file_case_insensitive_simple(filename, self.folder_path)
                     except FileNotFoundError:
                         log.error(f"File '{file_path}' not found. Skipping...")
+                        self.failed_count += 1
                         continue
 
                     card = self.create_card(filename, content)
@@ -314,9 +352,10 @@ class AnkiHelper:
 
 
 if __name__ == '__main__':
-    DEFAULT_FOLDER_PATH = './files3'
-    DEFAULT_DECK_NAME = "pruebas_notas_import"
-    INITIAL_MD_FILES = ['ejemplo_nota']  # Placeholder for initial markdown files, can be set later
+    log.info("Starting Anki Importer...")
+    DEFAULT_FOLDER_PATH = './workspace'
+    DEFAULT_DECK_NAME = "fabric_data_engineer"
+    INITIAL_MD_FILES = ['Microsoft Fabric Data Engineer']  # Placeholder for initial markdown files, can be set later
 
     # Configuration
 
@@ -326,7 +365,6 @@ if __name__ == '__main__':
 
     FOLDER_PATH = DEFAULT_FOLDER_PATH
     DECK_NAME = DEFAULT_DECK_NAME
-
     ah = AnkiHelper(folder_path=FOLDER_PATH, deck_name=DECK_NAME, skip_submission=False,
                     initial_md_files=INITIAL_MD_FILES)
 
@@ -337,3 +375,4 @@ if __name__ == '__main__':
 
     # Process the folder
     ah.run()
+    log.success('Finished processing markdown files.')
