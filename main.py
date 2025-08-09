@@ -14,7 +14,8 @@ import sys
 log.remove()
 log.add(sys.stdout, level="INFO")
 
-log.add(sink='./anki_importer.log', level='DEBUG', rotation='10 MB', retention='10 days', )
+# Max log size is 2.55 MB for pycharm read support, and it will be rotated after that.
+log.add(sink='./logs/anki_importer.log', level='DEBUG', rotation='2.55 MB', retention='10 days', )
 
 
 @dataclass

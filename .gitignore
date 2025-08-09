@@ -1,11 +1,36 @@
 # Python-generated files
 __pycache__/
 *.py[oc]
+
+# Build artifacts
 build/
 dist/
-wheels/
 *.egg-info
+wheels/
 
 # Virtual environments
 .venv
-/anki_importer.log
+
+# Logs
+*.log
+logs/
+
+# IDE-specific files
+.idea/
+
+# Anki Importer specific
+workspace/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# Cache files
+.cache/
+*.cache
