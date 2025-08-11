@@ -36,7 +36,7 @@ class AnkiHelper:
     not_included_tag = 'not_included'
 
     def __init__(self, folder_path="./files", deck_name="Default", host='http://localhost', port='8765',
-                 skip_submission=False, initial_md_files=None, mode='tree_from_flat_folder'):
+                 skip_submission=False, initial_md_files=None, mode='tree_from_flat_folder', card_prefix=''):
         # self.next_md_files = initial_md_files
         # self.new_md_files = initial_md_files
         self.folder_path = folder_path
@@ -48,6 +48,7 @@ class AnkiHelper:
         self.skip_submission = skip_submission  # Feature flag to skip submission
         # self.obsidian_links = set()  # obsidian links to other notes
         self.mode = mode
+        self.card_prefix = card_prefix
 
         match self.mode:
             case 'tree_from_flat_folder':
@@ -183,12 +184,12 @@ class AnkiHelper:
 
         if self.not_included_tag in card.tags:
             log.info(f"Skipping file '{filename}' due to '{self.not_included_tag}' tag.")
-            card.front = filename
+            card.front = self.card_prefix + filename
             card.back = "This note is skipped due to the 'not_included' tag."
             card.should_skip = True
             return card
 
-        card.front = os.path.splitext(filename)[0]  # Use filename without extension as front of card
+        card.front = self.card_prefix + os.path.splitext(filename)[0]  # Use filename without extension as front of card
 
         card.staged_content = self.extract_and_replace_images(card.staged_content)
         card.staged_content = self.extract_and_replace_obsidian_links(card.staged_content)
@@ -355,7 +356,7 @@ class AnkiHelper:
 if __name__ == '__main__':
     log.info("Starting Anki Importer...")
     DEFAULT_FOLDER_PATH = './workspace'
-    DEFAULT_DECK_NAME = "fabric_data_engineer"
+    DEFAULT_DECK_NAME = "test_fabric_data_engineer"
     INITIAL_MD_FILES = ['Microsoft Fabric Data Engineer']  # Placeholder for initial markdown files, can be set later
 
     # Configuration
@@ -367,7 +368,7 @@ if __name__ == '__main__':
     FOLDER_PATH = DEFAULT_FOLDER_PATH
     DECK_NAME = DEFAULT_DECK_NAME
     ah = AnkiHelper(folder_path=FOLDER_PATH, deck_name=DECK_NAME, skip_submission=False,
-                    initial_md_files=INITIAL_MD_FILES)
+                    initial_md_files=INITIAL_MD_FILES, card_prefix='')
 
     # Check AnkiConnect connection
     if not ah.check_anki_connection():
