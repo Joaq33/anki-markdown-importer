@@ -1,6 +1,6 @@
 [project]
 name = "obsidian-to-anki-individual"
-version = "1.2.1"
+version = "1.2.2"
 description = "Tool to convert Markdown files into Anki flashcards using AnkiConnect. Automates the creation of flashcard decks from Markdown content."
 readme = "README.md"
 requires-python = ">=3.13.5"

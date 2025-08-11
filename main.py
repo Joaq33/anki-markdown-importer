@@ -11,6 +11,8 @@ import requests
 from loguru import logger as log
 import sys
 
+# from prueba_anki import deck_name
+
 log.remove()
 log.add(sys.stdout, level="INFO")
 
@@ -36,7 +38,8 @@ class AnkiHelper:
     not_included_tag = 'not_included'
 
     def __init__(self, folder_path="./files", deck_name="Default", host='http://localhost', port='8765',
-                 skip_submission=False, initial_md_files=None, mode='tree_from_flat_folder', card_prefix=''):
+                 skip_submission=False, initial_md_files=None, mode='tree_from_flat_folder', card_prefix='',
+                 upsert=False):
         # self.next_md_files = initial_md_files
         # self.new_md_files = initial_md_files
         self.folder_path = folder_path
@@ -49,6 +52,7 @@ class AnkiHelper:
         # self.obsidian_links = set()  # obsidian links to other notes
         self.mode = mode
         self.card_prefix = card_prefix
+        self.upsert = upsert
 
         match self.mode:
             case 'tree_from_flat_folder':
@@ -115,27 +119,111 @@ class AnkiHelper:
         if self.skip_submission:
             log.info(f"Skipping submission for card '{card.front}' due to 'skip_submission' flag.")
             return 'SKIPPED'
-        return self.post_card_to_deck(card)
+        return self.post_card_to_deck_v2(card)
 
-    def post_card_to_deck(self, card: Card) -> str:
+    # def post_card_to_deck(self, card: Card) -> str:
+    #     """
+    #     Post a card to the Anki deck using AnkiConnect API.
+    #     :param card: Card object containing front, back, tags, etc.
+    #     :return: 'SUCCESS', 'FAILED', or 'SKIPPED' based on the result of the operation.
+    #     """
+    #     payload = {
+    #         "action": "addNote",
+    #         "version": 6,
+    #         "params": {
+    #             "note": {
+    #                 "deckName": self.deck_name,
+    #                 "modelName": "Basic",
+    #                 "fields": {
+    #                     "Front": card.front,
+    #                     "Back": card.back
+    #                 },
+    #                 "tags": list(card.tags) if card.tags else [],
+    #             }
+    #         }
+    #     }
+    #
+    #     try:
+    #         response = requests.post(self.url, json=payload)
+    #         result = response.json()
+    #
+    #         if result.get('error'):
+    #             if result['error'] == "cannot create note because it is a duplicate":
+    #                 log.warning(f"Note '{card.front}' already exists in the deck. Skipping duplicate.")
+    #                 return 'SKIPPED'
+    #             log.error(f"Error adding note '{card}': {result['error']}")
+    #             return 'FAILED'
+    #         else:
+    #             log.info(f"Successfully added note: {card}")
+    #             return 'SUCCESS'
+    #
+    #     except requests.exceptions.RequestException as e:
+    #         log.exception(f"Failed to connect to AnkiConnect: {e}")
+    #         return 'FAILED'
+
+    def check_card_existence(self, filename: str, card: Card) -> Optional[str]:
+        """
+        Check if a card with the given front already exists in the Anki deck.
+        """
+        payload = {
+            "action": "findNotes",
+            "version": 6,
+            "params": {"query": f"deck:{self.deck_name} front:\"{card.front}\""}
+        }
+        try:
+            response = requests.post(self.url, json=payload)
+            result = response.json()
+            if result.get('error'):
+                log.error(f"Error checking card existence for '{card.front}': {result['error']}")
+                raise Exception(f"Error checking card existence: {result['error']}")
+            if result['result']:
+                match len(result['result']):
+                    case 0:
+                        log.debug(f"No existing card found for front '{card.front}'.")
+                        return None  # No existing card found
+                    case 1:
+                        log.debug(f"Found existing card ID: {result['result'][0]} for front '{card.front}'.")
+                        return result['result'][0]  # Return the existing card ID
+                    case _:
+                        log.warning(f"Multiple cards found with the same front '{card.front}'. Returning first match.")
+                        return result['result'][0]  # Return the first match
+            log.debug(f"No result found for front '{card.front}' in deck '{self.deck_name}': {result}.")
+            return None  # No result found
+        except Exception as e:
+            log.exception(f"Error checking card existence for '{card.front}': {e}")
+            return None
+
+    def post_card_to_deck_v2(self, card: Card) -> str:
         """
         Post a card to the Anki deck using AnkiConnect API.
         :param card: Card object containing front, back, tags, etc.
         :return: 'SUCCESS', 'FAILED', or 'SKIPPED' based on the result of the operation.
         """
+        note_payload_field = {
+            "deckName": self.deck_name,
+            "modelName": "Basic",
+            "fields": {
+                "Front": card.front,
+                "Back": card.back
+            },
+            "tags": list(card.tags) if card.tags else [],
+        }
+
+        action = "addNote"
+        existing_card_id: Optional[str] = None
+        if self.upsert:
+            # Check card existence
+            existing_card_id = self.check_card_existence(card.front, card)
+            if existing_card_id:
+                note_payload_field['id'] = existing_card_id
+                del note_payload_field['fields']['Front']  # Do not update the front field
+                action = "updateNote"
+
         payload = {
-            "action": "addNote",
+            "action": action,
             "version": 6,
             "params": {
-                "note": {
-                    "deckName": self.deck_name,
-                    "modelName": "Basic",
-                    "fields": {
-                        "Front": card.front,
-                        "Back": card.back
-                    },
-                    "tags": list(card.tags) if card.tags else [],
-                }
+                "note": note_payload_field
             }
         }
 
@@ -144,13 +232,16 @@ class AnkiHelper:
             result = response.json()
 
             if result.get('error'):
-                if result['error'] =="cannot create note because it is a duplicate":
-                    log.warning(f"Note '{card.front}' already exists in the deck. Skipping duplicate.")
+                if result['error'] == "cannot create note because it is a duplicate":
+                    log.warning(f"Note '{card.front}' already exists in another deck. Skipping.")
                     return 'SKIPPED'
                 log.error(f"Error adding note '{card}': {result['error']}")
                 return 'FAILED'
             else:
-                log.info(f"Successfully added note: {card}")
+                if existing_card_id:
+                    log.info(f"Successfully updated note: {card}")
+                else:
+                    log.info(f"Successfully added note: {card}")
                 return 'SUCCESS'
 
         except requests.exceptions.RequestException as e:
@@ -356,7 +447,7 @@ class AnkiHelper:
 if __name__ == '__main__':
     log.info("Starting Anki Importer...")
     DEFAULT_FOLDER_PATH = './workspace'
-    DEFAULT_DECK_NAME = "test_fabric_data_engineer"
+    DEFAULT_DECK_NAME = "fabric_data_engineer"
     INITIAL_MD_FILES = ['Microsoft Fabric Data Engineer']  # Placeholder for initial markdown files, can be set later
 
     # Configuration
@@ -368,7 +459,7 @@ if __name__ == '__main__':
     FOLDER_PATH = DEFAULT_FOLDER_PATH
     DECK_NAME = DEFAULT_DECK_NAME
     ah = AnkiHelper(folder_path=FOLDER_PATH, deck_name=DECK_NAME, skip_submission=False,
-                    initial_md_files=INITIAL_MD_FILES, card_prefix='')
+                    initial_md_files=INITIAL_MD_FILES, card_prefix='', upsert=True)
 
     # Check AnkiConnect connection
     if not ah.check_anki_connection():
