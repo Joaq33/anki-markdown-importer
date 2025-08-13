@@ -6,7 +6,9 @@ from dataclasses import field
 from typing import Optional
 
 import frontmatter
-import markdown
+from markdown_it import MarkdownIt
+
+
 import requests
 from loguru import logger as log
 import sys
@@ -30,7 +32,6 @@ class Card:
     tags: set[str] = field(default_factory=set)
 
     def __repr__(self):
-        # return f"Card(tags={self.tags}, front={self.front!r}, back={self.back[:20]!r}...)"
         return f"Card(front={self.front!r}, back={self.back[:20]!r}..., tags={self.tags})"
 
 
@@ -40,8 +41,6 @@ class AnkiHelper:
     def __init__(self, folder_path="./files", deck_name="Default", host='http://localhost', port='8765',
                  skip_submission=False, initial_md_files=None, mode='tree_from_flat_folder', card_prefix='',
                  upsert=False):
-        # self.next_md_files = initial_md_files
-        # self.new_md_files = initial_md_files
         self.folder_path = folder_path
         self.deck_name = deck_name
         self.url = host + ':' + port
@@ -49,7 +48,6 @@ class AnkiHelper:
         self.failed_count = 0
         self.skipped_count = 0
         self.skip_submission = skip_submission  # Feature flag to skip submission
-        # self.obsidian_links = set()  # obsidian links to other notes
         self.mode = mode
         self.card_prefix = card_prefix
         self.upsert = upsert
@@ -78,7 +76,6 @@ class AnkiHelper:
         """
         assert filename is not None, "filename must be provided"
         assert isinstance(filename, str), "filename must be a string"
-        # assert filename.endswith('.md') or filename.endswith('.markdown'), "filename must be a markdown file"
 
         # Only execute if mode is recursive
         if self.mode in {'flat', }:
@@ -119,49 +116,9 @@ class AnkiHelper:
         if self.skip_submission:
             log.info(f"Skipping submission for card '{card.front}' due to 'skip_submission' flag.")
             return 'SKIPPED'
-        return self.post_card_to_deck_v2(card)
+        return self.post_card_to_deck(card)
 
-    # def post_card_to_deck(self, card: Card) -> str:
-    #     """
-    #     Post a card to the Anki deck using AnkiConnect API.
-    #     :param card: Card object containing front, back, tags, etc.
-    #     :return: 'SUCCESS', 'FAILED', or 'SKIPPED' based on the result of the operation.
-    #     """
-    #     payload = {
-    #         "action": "addNote",
-    #         "version": 6,
-    #         "params": {
-    #             "note": {
-    #                 "deckName": self.deck_name,
-    #                 "modelName": "Basic",
-    #                 "fields": {
-    #                     "Front": card.front,
-    #                     "Back": card.back
-    #                 },
-    #                 "tags": list(card.tags) if card.tags else [],
-    #             }
-    #         }
-    #     }
-    #
-    #     try:
-    #         response = requests.post(self.url, json=payload)
-    #         result = response.json()
-    #
-    #         if result.get('error'):
-    #             if result['error'] == "cannot create note because it is a duplicate":
-    #                 log.warning(f"Note '{card.front}' already exists in the deck. Skipping duplicate.")
-    #                 return 'SKIPPED'
-    #             log.error(f"Error adding note '{card}': {result['error']}")
-    #             return 'FAILED'
-    #         else:
-    #             log.info(f"Successfully added note: {card}")
-    #             return 'SUCCESS'
-    #
-    #     except requests.exceptions.RequestException as e:
-    #         log.exception(f"Failed to connect to AnkiConnect: {e}")
-    #         return 'FAILED'
-
-    def check_card_existence(self, filename: str, card: Card) -> Optional[str]:
+    def check_card_existence(self, card: Card) -> Optional[str]:
         """
         Check if a card with the given front already exists in the Anki deck.
         """
@@ -193,7 +150,7 @@ class AnkiHelper:
             log.exception(f"Error checking card existence for '{card.front}': {e}")
             return None
 
-    def post_card_to_deck_v2(self, card: Card) -> str:
+    def post_card_to_deck(self, card: Card) -> str:
         """
         Post a card to the Anki deck using AnkiConnect API.
         :param card: Card object containing front, back, tags, etc.
@@ -213,7 +170,7 @@ class AnkiHelper:
         existing_card_id: Optional[str] = None
         if self.upsert:
             # Check card existence
-            existing_card_id = self.check_card_existence(card.front, card)
+            existing_card_id = self.check_card_existence(card)
             if existing_card_id:
                 note_payload_field['id'] = existing_card_id
                 del note_payload_field['fields']['Front']  # Do not update the front field
@@ -252,10 +209,7 @@ class AnkiHelper:
     def md_to_html_parser(md_content):
         """Convert markdown content to HTML"""
 
-        # fix ][ line breaks
-        md_content = md_content.replace('\n', '<br>')
-
-        return markdown.markdown(md_content)
+        return MarkdownIt().render(md_content)
 
     def create_card(self, filename: str, content: str) -> Card:
         card = Card()
@@ -339,8 +293,6 @@ class AnkiHelper:
                 try:
                     try:
                         # Read file content
-                        # with open(file_path, 'r', encoding='utf-8') as file:
-                        #     content = file.read()
                         content = self.read_file_case_insensitive_simple(filename, self.folder_path)
                     except FileNotFoundError:
                         log.error(f"File '{file_path}' not found. Skipping...")
@@ -376,7 +328,6 @@ class AnkiHelper:
     def _check_folder_existance(self):
         # Check if folder exists
         if not os.path.exists(self.folder_path):
-            # print(f"Error: Folder '{self.folder_path}' does not exist.")
             raise FileNotFoundError(f"Folder '{self.folder_path}' does not exist.")
 
     @staticmethod
@@ -406,16 +357,14 @@ class AnkiHelper:
             alias_match = match_split[1].strip() if len(match_split) > 1 else cleaned_match
 
             # Add the actual link to the set
-            # self.obsidian_links.add(cleaned_match)
             self.update_md_files_trackers(cleaned_match)
 
-            # Return the alias to replace the original match with an html underline
+            # Return the alias to replace the original match with a html underline
             return f"<ins>{alias_match}</ins>"
 
         # Single pass through the content - O(n)
         content = re.sub(obsidian_link_pattern, _extract_and_replace_helper, content)
 
-        # log.info(f"Found Obsidian links: {self.obsidian_links}")
         log.debug(f"Content modified to remove Obsidian links: {content[:100]}...")  # Log first 100 characters
 
         # Keep only the first part of the content
@@ -448,6 +397,7 @@ if __name__ == '__main__':
     log.info("Starting Anki Importer...")
     DEFAULT_FOLDER_PATH = './workspace'
     DEFAULT_DECK_NAME = "fabric_data_engineer"
+    # DEFAULT_DECK_NAME = "test_deck"
     INITIAL_MD_FILES = ['Microsoft Fabric Data Engineer']  # Placeholder for initial markdown files, can be set later
 
     # Configuration
@@ -458,8 +408,9 @@ if __name__ == '__main__':
 
     FOLDER_PATH = DEFAULT_FOLDER_PATH
     DECK_NAME = DEFAULT_DECK_NAME
+    CARD_PREFIX = ''
     ah = AnkiHelper(folder_path=FOLDER_PATH, deck_name=DECK_NAME, skip_submission=False,
-                    initial_md_files=INITIAL_MD_FILES, card_prefix='', upsert=True)
+                    initial_md_files=INITIAL_MD_FILES, card_prefix=CARD_PREFIX, upsert=True)
 
     # Check AnkiConnect connection
     if not ah.check_anki_connection():
