@@ -16,6 +16,8 @@
 -   **Direct Anki Integration:** Uses the AnkiConnect addon to add notes directly to your specified deck.
 -   **Robust Logging:** Keeps a detailed log of all operations for easy debugging.
 -   **Case-Insensitive Linking:** Finds your linked notes even if the link's capitalization doesn't match the filename.
+-   **Native MathJax LaTeX Support:** Automatically protects LaTeX (`$` and `$$`) during markdown rendering and outputs native Anki MathJax delimiters (`\(` and `\[`), preventing Markdown parser corruption and enabling native rendering.
+-   **Dataview Formula Substitution:** Dynamically evaluates inline Dataview queries like `="\$"+this.formula+"\$"` and replaces them with the actual `formula` property value defined in your note's frontmatter.
 
 ---
 

@@ -207,9 +207,30 @@ class AnkiHelper:
 
     @staticmethod
     def md_to_html_parser(md_content):
-        """Convert markdown content to HTML"""
+        """Convert markdown content to HTML with MathJax support for Anki"""
+        math_blocks = []
 
-        return MarkdownIt().render(md_content)
+        def repl_block(m):
+            math_blocks.append(m.group(1))
+            return f"MATH_BLOCK_{len(math_blocks)-1}"
+
+        def repl_inline(m):
+            math_blocks.append(m.group(1))
+            return f"MATH_INLINE_{len(math_blocks)-1}"
+
+        # Extract math blocks to prevent markdown-it from parsing them
+        md_content = re.sub(r'\$\$(.*?)\$\$', repl_block, md_content, flags=re.DOTALL)
+        md_content = re.sub(r'\$(.*?)\$', repl_inline, md_content, flags=re.DOTALL)
+
+        html = MarkdownIt().render(md_content)
+
+        # Restore math blocks with Anki's MathJax syntax
+        for i, content in enumerate(math_blocks):
+            # Use Anki's \( \) for inline and \[ \] for block
+            html = html.replace(f"MATH_BLOCK_{i}", f"\\[{content}\\]")
+            html = html.replace(f"MATH_INLINE_{i}", f"\\({content}\\)")
+
+        return html
 
     def create_card(self, filename: str, content: str) -> Card:
         card = Card()
@@ -238,6 +259,7 @@ class AnkiHelper:
 
         card.staged_content = self.extract_and_replace_images(card.staged_content)
         card.staged_content = self.extract_and_replace_obsidian_links(card.staged_content)
+        card.staged_content = self.extract_and_replace_formula_property(card.staged_content, card.frontmatter)
 
         card.back = self.md_to_html_parser(
             card.staged_content)  # Convert markdown content to HTML for the back of the card
@@ -382,6 +404,17 @@ class AnkiHelper:
         staged_content = re.sub(image_pattern, '*__[image_placeholder]__*', staged_content)
         return staged_content
 
+    def extract_and_replace_formula_property(self, content: str, frontmatter: dict) -> str:
+        if frontmatter and 'formula' in frontmatter:
+            formula_val = str(frontmatter['formula'])
+            # Match `="$"+this.formula+"$"` (with or without backticks, with flexible spacing)
+            pattern = r'`?="\$"\s*\+\s*this\.formula\s*\+\s*"\$"`?'
+            
+            # $formula_val$ because the query explicitly adds $ around it
+            replacement = f"${formula_val}$"
+            content = re.sub(pattern, lambda m: replacement, content)
+        return content
+
     def get_all_md_in_folder(self):
         tmp = self._get_all_md_in_folder(self.folder_path)
 
@@ -395,10 +428,10 @@ class AnkiHelper:
 
 if __name__ == '__main__':
     log.info("Starting Anki Importer...")
-    DEFAULT_FOLDER_PATH = './workspace'
-    DEFAULT_DECK_NAME = "fabric_data_engineer"
+    DEFAULT_FOLDER_PATH = './workspace_algebra'
+    DEFAULT_DECK_NAME = "algebra_obsidian"
     # DEFAULT_DECK_NAME = "test_deck"
-    INITIAL_MD_FILES = ['Microsoft Fabric Data Engineer']  # Placeholder for initial markdown files, can be set later
+    INITIAL_MD_FILES = ['repaso_algebra']  # Placeholder for initial markdown files, can be set later
 
     # Configuration
 
