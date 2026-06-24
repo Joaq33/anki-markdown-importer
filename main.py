@@ -58,8 +58,9 @@ class AnkiHelper:
                 self.next_md_files = []  # next markdown files to be processed helper
                 try:
                     # self.update_md_files_trackers(initial_md_files) if initial_md_files else None
-                    for filename in initial_md_files:
-                        self.update_md_files_trackers(filename)
+                    if initial_md_files:
+                        for filename in initial_md_files:
+                            self.update_md_files_trackers(filename)
                 except Exception as e:
                     log.exception(f"Error initializing markdown files trackers: {e}")
                     raise e
@@ -428,10 +429,10 @@ class AnkiHelper:
 
 if __name__ == '__main__':
     log.info("Starting Anki Importer...")
-    DEFAULT_FOLDER_PATH = './workspace_algebra'
-    DEFAULT_DECK_NAME = "algebra_obsidian"
+    DEFAULT_FOLDER_PATH = './vaults/parcial2algebra/'
+    DEFAULT_DECK_NAME = "cosas"
     # DEFAULT_DECK_NAME = "test_deck"
-    INITIAL_MD_FILES = ['repaso_algebra']  # Placeholder for initial markdown files, can be set later
+    INITIAL_MD_FILES = ['Polinomios - Unidad 6 - Álgebra']  # Placeholder for initial markdown files, can be set later
 
     # Configuration
 

@@ -34,3 +34,4 @@ workspace/
 # Cache files
 .cache/
 *.cache
+vaults/
