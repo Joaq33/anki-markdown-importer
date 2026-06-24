@@ -83,3 +83,34 @@ class TestAnkiHelper(TestCase):
         self.assertIn("root_note", anki_helper.md_files_tracked)
         self.assertIn("linked_note", anki_helper.md_files_tracked)
         self.assertIn("not_included_note", anki_helper.md_files_tracked)
+
+    def test_extract_and_format_callouts(self):
+        anki_helper = AnkiHelper(folder_path=TEST_DIR, skip_submission=True)
+        content = """> [!info] My Custom Info
+> Hello world
+> **bold**
+
+> [!example] Some Example
+> Inside example
+
+> [!tip]
+> A tip with no custom title
+"""
+        card = anki_helper.create_card("test_callout.md", content)
+        
+        # Verify custom info callout with type indicator before title
+        # In this case it is not example, tip, warning or error, so no indicator for 'info'
+        self.assertIn('<div class="callout callout-info"', card.back)
+        self.assertIn('My Custom Info', card.back)
+        self.assertNotIn('[info]', card.back)
+        
+        # Verify example callout has muted styling and indicator
+        self.assertIn('<div class="callout callout-example" style="text-align: left; border-left: 4px solid #8e8e93; background-color: rgba(142, 142, 147, 0.08); padding: 10px; margin: 10px 0; border-radius: 4px;">', card.back)
+        self.assertIn('<div style="font-size: 0.75em; font-weight: normal; opacity: 0.6; text-transform: uppercase; margin-bottom: 2px; color: #8e8e93;">[example]</div>', card.back)
+        self.assertIn('<div style="font-weight: bold; font-size: 1.05em; color: inherit;">Some Example</div>', card.back)
+        
+        # Verify tip callout with no custom title doesn't get indicator but gets capitalized title
+        self.assertIn('<div class="callout callout-tip"', card.back)
+        self.assertIn('Tip', card.back)
+        self.assertNotIn('[tip]', card.back)
+

@@ -13,7 +13,6 @@ import requests
 from loguru import logger as log
 import sys
 
-# from prueba_anki import deck_name
 
 log.remove()
 log.add(sys.stdout, level="INFO")
@@ -261,6 +260,7 @@ class AnkiHelper:
         card.staged_content = self.extract_and_replace_images(card.staged_content)
         card.staged_content = self.extract_and_replace_obsidian_links(card.staged_content)
         card.staged_content = self.extract_and_replace_formula_property(card.staged_content, card.frontmatter)
+        card.staged_content = self.extract_and_format_callouts(card.staged_content)
 
         card.back = self.md_to_html_parser(
             card.staged_content)  # Convert markdown content to HTML for the back of the card
@@ -415,6 +415,59 @@ class AnkiHelper:
             replacement = f"${formula_val}$"
             content = re.sub(pattern, lambda m: replacement, content)
         return content
+
+    def extract_and_format_callouts(self, content: str) -> str:
+        pattern = re.compile(r'^(> \[!(?P<type>[a-zA-Z]+)\](?P<title>.*?)$(?:\n>.*)*)', re.MULTILINE)
+        
+        colors = {
+            'info': ('#3b82f6', 'rgba(59, 130, 246, 0.08)'),
+            'note': ('#3b82f6', 'rgba(59, 130, 246, 0.08)'),
+            'tip': ('#10b981', 'rgba(16, 185, 129, 0.08)'),
+            'success': ('#10b981', 'rgba(16, 185, 129, 0.08)'),
+            'warning': ('#f59e0b', 'rgba(245, 158, 11, 0.08)'),
+            'danger': ('#ef4444', 'rgba(239, 68, 68, 0.08)'),
+            'error': ('#ef4444', 'rgba(239, 68, 68, 0.08)'),
+            'example': ('#8e8e93', 'rgba(142, 142, 147, 0.08)'),
+        }
+        
+        def replace(match):
+            full_match = match.group(1)
+            callout_type = match.group('type').lower()
+            
+            raw_title = match.group('title').strip()
+            has_custom_title = bool(raw_title)
+            title = raw_title if has_custom_title else callout_type.capitalize()
+            
+            color, bg_color = colors.get(callout_type, ('#6b7280', 'rgba(107, 114, 128, 0.08)'))
+
+            type_indicator = ""
+            if has_custom_title and callout_type in ['example', 'tip', 'warning', 'error']:
+                type_indicator = f'<div style="font-size: 0.75em; font-weight: normal; opacity: 0.6; text-transform: uppercase; margin-bottom: 2px; color: {color};">[{callout_type}]</div>'
+            
+            lines = full_match.split('\n')
+            content_lines = []
+            for line in lines[1:]:
+                if line.startswith('> '):
+                    content_lines.append(line[2:])
+                elif line.startswith('>'):
+                    content_lines.append(line[1:])
+                else:
+                    content_lines.append(line)
+            
+            inner_content = '\n'.join(content_lines)
+            
+            if type_indicator:
+                # Custom title gets default page color (inherit from page)
+                title_block = f'{type_indicator}<div style="font-weight: bold; font-size: 1.05em; color: inherit;">{title}</div>'
+            else:
+                # Default title gets the callout color
+                title_block = f'<div style="font-weight: bold; font-size: 1.05em; color: {color};">{title}</div>'
+            
+            content_opacity = "0.75" if callout_type == 'example' else "0.9"
+            
+            return f'''<div class="callout callout-{callout_type}" style="text-align: left; border-left: 4px solid {color}; background-color: {bg_color}; padding: 10px; margin: 10px 0; border-radius: 4px;">\n<div class="callout-title" style="margin-bottom: 8px;">{title_block}</div>\n\n<div class="callout-content" style="opacity: {content_opacity};">\n\n{inner_content}\n\n</div>\n\n</div>'''
+
+        return pattern.sub(replace, content)
 
     def get_all_md_in_folder(self):
         tmp = self._get_all_md_in_folder(self.folder_path)

@@ -21,6 +21,7 @@ A highly robust, obsidian-aware automation tool that seamlessly imports your Mar
 | **🎭 Wikilink Aliases** | Parses piped links like `[[Target Note \| Custom Display Name]]`, automatically creating an underlined HTML `<ins>` view in the card back. |
 | **🖼️ Image Protection** | Detects local Obsidian image embeds `![[image.png]]` or `![[image.jpg|width]]` and replaces them with clean `*[image_placeholder]*` tags to keep layouts tidy. |
 | **🛑 Selective Skipping** | Skip notes you don't want in Anki by simply adding the `not_included` tag to their frontmatter or body. |
+| **💡 Callout Integration** | Detects Obsidian callouts (like `> [!tip]`, `> [!warning]`) and styles them into distinctive, left-aligned, high-contrast HTML cards. |
 | **🪵 High-Fidelity Logging** | Powered by `loguru`, generates rotation-aware, colorized logging to both standard output and `/logs/anki_importer.log`. |
 
 ---
