@@ -39,7 +39,7 @@ class AnkiHelper:
 
     def __init__(self, folder_path="./files", deck_name="Default", host='http://localhost', port='8765',
                  skip_submission=False, initial_md_files=None, mode='tree_from_flat_folder', card_prefix='',
-                 upsert=False):
+                 upsert=False, generate_links=True):  # <-- NEW PARAMETER
         self.folder_path = folder_path
         self.deck_name = deck_name
         self.url = host + ':' + port
@@ -50,6 +50,8 @@ class AnkiHelper:
         self.mode = mode
         self.card_prefix = card_prefix
         self.upsert = upsert
+        self.generate_links = generate_links  # <-- NEW: Toggle for cross-platform links
+        self.posted_cards: list[tuple[Card, int]] = []  # (card, note_id) for link resolution
 
         match self.mode:
             case 'tree_from_flat_folder':
@@ -125,7 +127,7 @@ class AnkiHelper:
         payload = {
             "action": "findNotes",
             "version": 6,
-            "params": {"query": f"deck:{self.deck_name} front:\"{card.front}\""}
+            "params": {"query": f'deck:"{self.deck_name}" front:"{card.front}"'}
         }
         try:
             response = requests.post(self.url, json=payload)
@@ -190,11 +192,14 @@ class AnkiHelper:
 
             if result.get('error'):
                 if result['error'] == "cannot create note because it is a duplicate":
-                    log.warning(f"Note '{card.front}' already exists in another deck. Skipping.")
+                    log.warning(f"Note '{card.front}' is a duplicate and already exists. Skipping. (Enable upsert=True to update it instead.)")
                     return 'SKIPPED'
                 log.error(f"Error adding note '{card}': {result['error']}")
                 return 'FAILED'
             else:
+                note_id = existing_card_id if existing_card_id else result.get('result')
+                if note_id:
+                    self.posted_cards.append((card, int(note_id)))
                 if existing_card_id:
                     log.info(f"Successfully updated note: {card}")
                 else:
@@ -209,27 +214,18 @@ class AnkiHelper:
     def md_to_html_parser(md_content):
         """Convert markdown content to HTML with MathJax support for Anki"""
         math_blocks = []
-
         def repl_block(m):
             math_blocks.append(m.group(1))
-            return f"MATH_BLOCK_{len(math_blocks)-1}"
-
+            return f"MATH_BLOCK_{len(math_blocks)-1}_END"
         def repl_inline(m):
             math_blocks.append(m.group(1))
-            return f"MATH_INLINE_{len(math_blocks)-1}"
-
-        # Extract math blocks to prevent markdown-it from parsing them
+            return f"MATH_INLINE_{len(math_blocks)-1}_END"
         md_content = re.sub(r'\$\$(.*?)\$\$', repl_block, md_content, flags=re.DOTALL)
         md_content = re.sub(r'\$(.*?)\$', repl_inline, md_content, flags=re.DOTALL)
-
         html = MarkdownIt().render(md_content)
-
-        # Restore math blocks with Anki's MathJax syntax
         for i, content in enumerate(math_blocks):
-            # Use Anki's \( \) for inline and \[ \] for block
-            html = html.replace(f"MATH_BLOCK_{i}", f"\\[{content}\\]")
-            html = html.replace(f"MATH_INLINE_{i}", f"\\({content}\\)")
-
+            html = html.replace(f"MATH_BLOCK_{i}_END", f"\\[{content}\\]")
+            html = html.replace(f"MATH_INLINE_{i}_END", f"\\({content}\\)")
         return html
 
     def create_card(self, filename: str, content: str) -> Card:
@@ -298,6 +294,7 @@ class AnkiHelper:
         log.info(
             f"Starting to process markdown files in folder: {self.folder_path}")  # todo change to reference initial files instead of folder path
         log.info(f"Using Anki deck: {self.deck_name}")
+        log.info(f"Link generation enabled: {self.generate_links}")  # <-- NEW: Log the flag status
 
         # # Get all markdown files using folder_path
         # self.new_md_files = self.get_all_md_in_folder()
@@ -343,6 +340,9 @@ class AnkiHelper:
                     self.failed_count += 1
             self.new_md_files = self.next_md_files  # Update the list for the next iteration
 
+        if not self.skip_submission and self.generate_links:  # <-- MODIFIED: Only resolve if links enabled
+            self.resolve_pending_links()
+
         log.info(f"\nProcessing complete!")
         log.info(f"Successfully added: {self.success_count} notes")
         log.info(f"Failed: {self.failed_count} notes")
@@ -382,8 +382,12 @@ class AnkiHelper:
             # Add the actual link to the set
             self.update_md_files_trackers(cleaned_match)
 
-            # Return the alias to replace the original match with a html underline
-            return f"<ins>{alias_match}</ins>"
+            if self.generate_links:  # <-- MODIFIED: Only generate links if enabled
+                # Use a pending placeholder — resolved to real nid after all notes are posted
+                return f'[{alias_match}|nidPENDING:{cleaned_match}]'
+            else:
+                # Just return plain text alias, no link
+                return alias_match
 
         # Single pass through the content - O(n)
         content = re.sub(obsidian_link_pattern, _extract_and_replace_helper, content)
@@ -469,6 +473,94 @@ class AnkiHelper:
 
         return pattern.sub(replace, content)
 
+    def resolve_pending_links(self) -> None:
+        """
+        Second pass: find ALL notes in Anki that still have [Alias|nidPENDING:target]
+        placeholders and replace them with real [Alias|nidXXXXXXXXXXXXX] links.
+        This runs independently of posted_cards so it works even when notes were SKIPPED.
+        """
+        pending_pattern = re.compile(r'\[([^\]]*?)\|nidPENDING:([^\]]+)\]')
+        nid_cache: dict[str, int] = {}
+        resolved_count = 0
+        failed_count = 0
+
+        # 1. Find all notes in the deck that still have pending placeholders
+        try:
+            find_result = requests.post(self.url, json={
+                "action": "findNotes",
+                "version": 6,
+                "params": {"query": f'deck:"{self.deck_name}" Back:*nidPENDING*'}
+            }).json()
+        except Exception as e:
+            log.error(f"resolve_pending_links: failed to query Anki: {e}")
+            return
+
+        note_ids = find_result.get('result', [])
+        if not note_ids:
+            log.info("Link resolution: no pending links found.")
+            return
+
+        # 2. Fetch their field content
+        try:
+            info_result = requests.post(self.url, json={
+                "action": "notesInfo",
+                "version": 6,
+                "params": {"notes": note_ids}
+            }).json()
+        except Exception as e:
+            log.error(f"resolve_pending_links: failed to fetch notes info: {e}")
+            return
+
+        def _lookup_nid(target: str) -> int | None:
+            if target in nid_cache:
+                return nid_cache[target]
+            try:
+                result = requests.post(self.url, json={
+                    "action": "findNotes",
+                    "version": 6,
+                    "params": {"query": f'Front:"{target}"'}
+                }).json()
+                if result.get('result'):
+                    nid_cache[target] = result['result'][0]
+                    return nid_cache[target]
+            except Exception:
+                pass
+            return None
+
+        # 3. Resolve and update each note
+        for note_info in info_result.get('result', []):
+            note_id = note_info['noteId']
+            back = note_info['fields']['Back']['value']
+
+            if 'nidPENDING:' not in back:
+                continue
+
+            def _resolve(match):
+                nonlocal resolved_count, failed_count
+                alias, target = match.group(1), match.group(2)
+                nid = _lookup_nid(target)
+                if nid:
+                    resolved_count += 1
+                    return f'[{alias}|nid{nid}]'
+                log.warning(f"Could not resolve link target '{target}'. Keeping as plain text.")
+                failed_count += 1
+                return alias
+
+            new_back = pending_pattern.sub(_resolve, back)
+
+            if new_back != back:
+                try:
+                    requests.post(self.url, json={
+                        "action": "updateNote",
+                        "version": 6,
+                        "params": {"note": {"id": note_id, "fields": {"Back": new_back}}}
+                    })
+                    log.debug(f"Resolved links for note id {note_id}.")
+                except Exception as e:
+                    log.error(f"Failed to update note {note_id}: {e}")
+
+        log.info(f"Link resolution complete: {resolved_count} resolved, {failed_count} unresolved.")
+
     def get_all_md_in_folder(self):
         tmp = self._get_all_md_in_folder(self.folder_path)
 
@@ -483,7 +575,7 @@ class AnkiHelper:
 if __name__ == '__main__':
     log.info("Starting Anki Importer...")
     DEFAULT_FOLDER_PATH = './vaults/parcial2algebra/'
-    DEFAULT_DECK_NAME = "cosas"
+    DEFAULT_DECK_NAME = "TUCD::Álgebra::Parcial 2"
     # DEFAULT_DECK_NAME = "test_deck"
     INITIAL_MD_FILES = ['Polinomios - Unidad 6 - Álgebra']  # Placeholder for initial markdown files, can be set later
 
@@ -496,9 +588,15 @@ if __name__ == '__main__':
     FOLDER_PATH = DEFAULT_FOLDER_PATH
     DECK_NAME = DEFAULT_DECK_NAME
     CARD_PREFIX = ''
+    
+    # Toggle this based on your platform:
+    # - True: Generates [Alias|nidXXXX] links (requires desktop add-on like Anki Note Linker)
+    # - False: Just inserts plain text aliases (works everywhere, but no clicking)
+    GENERATE_LINKS = False  # Set to False for Android/mobile-only use
+    
     ah = AnkiHelper(folder_path=FOLDER_PATH, deck_name=DECK_NAME, skip_submission=False,
-                    initial_md_files=INITIAL_MD_FILES, card_prefix=CARD_PREFIX, upsert=True)
-
+                    initial_md_files=INITIAL_MD_FILES, card_prefix=CARD_PREFIX, upsert=True,
+                    generate_links=GENERATE_LINKS)
     # Check AnkiConnect connection
     if not ah.check_anki_connection():
         raise ConnectionError(

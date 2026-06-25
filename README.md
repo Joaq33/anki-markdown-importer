@@ -18,7 +18,7 @@ A highly robust, obsidian-aware automation tool that seamlessly imports your Mar
 | **🏷️ Dual Tag Extraction** | Extracts tags defined in your YAML frontmatter *and* `#hashtags` from note body text, keeping your Anki database perfectly categorized. |
 | **🧮 Native MathJax Support** | Automatically guards LaTeX content (`$` and `$$`) during markdown rendering to prevent Markdown-parser corruption and outputs native Anki MathJax delimiters (`\(` and `\[`). |
 | **📊 Dataview Integration** | Dynamically evaluates inline Dataview queries like `="\$"+this.formula+"\$"` and replaces them with corresponding YAML frontmatter property values. |
-| **🎭 Wikilink Aliases** | Parses piped links like `[[Target Note \| Custom Display Name]]`, automatically creating an underlined HTML `<ins>` view in the card back. |
+| **🎭 Functional Wikilinks** | Parses piped links like `[[Target Note \| Custom Display Name]]` into native Obsidian URIs, allowing you to instantly jump back to the original note in Obsidian directly from your Anki reviewer. |
 | **🖼️ Image Protection** | Detects local Obsidian image embeds `![[image.png]]` or `![[image.jpg|width]]` and replaces them with clean `*[image_placeholder]*` tags to keep layouts tidy. |
 | **🛑 Selective Skipping** | Skip notes you don't want in Anki by simply adding the `not_included` tag to their frontmatter or body. |
 | **💡 Callout Integration** | Detects Obsidian callouts (like `> [!tip]`, `> [!warning]`) and styles them into distinctive, left-aligned, high-contrast HTML cards. |
