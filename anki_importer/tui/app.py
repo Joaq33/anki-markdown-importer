@@ -38,6 +38,7 @@ from ..stage import Stage
 from ..logging_setup import remove_sink, take_over_terminal
 from ..settings_store import DEFAULT_FILE_NAME, load_settings, save_settings
 from ..notes import list_note_names
+from .theme import ANKI_THEME, THEME_NAME
 from .screens import (
     CardDetailScreen,
     ConfigScreen,
@@ -54,18 +55,18 @@ class AnkiImporterApp(App[None]):
 
     TITLE = "Anki importer"
     CSS = """
-    #controls { height: auto; padding: 0 2; }
-    #controls .field { height: 3; margin-bottom: 1; }
-    #controls Label { width: 14; padding: 1 1 0 0; color: $text-muted; }
+    #source { height: auto; background: $surface; padding: 1 2 0 2; }
+    #source .field { height: 3; margin-bottom: 1; }
+    #source Label { width: 14; padding: 1 1 0 0; color: $text-muted; }
     #vault-path, #root-notes { width: 1fr; }
-    #controls .field Button { width: auto; margin-left: 1; }
-    #buttons { height: 3; }
+    #source .field Button { width: auto; margin-left: 1; }
+    #buttons { height: 3; padding-top: 1; }
     #buttons Button { margin-right: 1; }
-    #notice { height: auto; min-height: 2; padding: 1 2 0 2; text-style: bold; }
-    #counts { height: 1; padding: 0 2; color: $text-muted; }
+    #notice { height: auto; min-height: 1; padding: 1 2 0 2; text-style: bold; }
     #progress { height: 1; margin: 0 2; }
-    #cards { height: 1fr; margin-top: 1; border-top: solid $primary; }
-    #log { height: 6; border-top: solid $primary; }
+    #counts { height: 1; padding: 0 2; color: $text-muted; }
+    #cards { height: 1fr; margin-top: 1; }
+    #log { height: 5; background: $surface; }
     """
     BINDINGS = [
         Binding("r", "run", "Run"),
@@ -80,6 +81,8 @@ class AnkiImporterApp(App[None]):
 
     def __init__(self, config_path: str | Path | None = None) -> None:
         super().__init__()
+        self.register_theme(ANKI_THEME)
+        self.theme = THEME_NAME
         self.config_path = Path(config_path) if config_path else Path.cwd() / DEFAULT_FILE_NAME
         self.settings = load_settings(self.config_path)
         self.source: NoteSource | None = None
@@ -100,7 +103,7 @@ class AnkiImporterApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Vertical(id="controls"):
+        with Vertical(id="source"):
             with Horizontal(classes="field"):
                 yield Label("Vault folder")
                 yield Input(placeholder="vaults/mi-vault", id="vault-path")
@@ -114,8 +117,8 @@ class AnkiImporterApp(App[None]):
                 yield Button("Import into Anki", id="submit", variant="success")
                 yield Button("Help", id="help")
         yield NoticeBar(Stage.IDLE.message, id="notice")
+        yield ProgressBar(id="progress", show_eta=False)
         yield CountBar(id="counts")
-        yield ProgressBar(id="progress")
         yield CardTable(id="cards")
         yield LogPanel(id="log")
 

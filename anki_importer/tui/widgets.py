@@ -114,7 +114,10 @@ class CountBar(Static):
 
     def tally(self, found: int, missing: int, processed: int = 0) -> None:
         self.counts = {"found": found, "missing": missing, "processed": processed}
-        self.update(self._text())
+        text = f"missing {missing}" if missing else ""
+        self.update(text)
+        # An empty tally costs no rows; the notice above already said enough.
+        self.styles.height = 0 if not text else 1
 
     def reset(self) -> None:
         self.tally(0, 0, 0)
@@ -141,6 +144,7 @@ class CountBar(Static):
             "failed": summary.failed,
         }
         self.update(self.text_for(summary))
+        self.styles.height = 1
 
     def _text(self) -> str:
         found = self.counts["found"]
