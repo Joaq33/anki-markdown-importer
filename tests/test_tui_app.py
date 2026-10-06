@@ -1,12 +1,14 @@
 """Tests for the app's dry run: the first thing a user can actually do."""
 
 import threading
+from pathlib import Path
 
 import pytest
-from textual.widgets import ProgressBar
+from textual.widgets import Input, ProgressBar, Switch
 
 from anki_importer.import_run import ImportRun, RunSettings
 from anki_importer.notes import FolderNoteSource
+from anki_importer.settings_store import load_settings, save_settings
 from anki_importer.stage import Stage
 from anki_importer.tui.app import AnkiImporterApp
 from anki_importer.tui.widgets import CardTable, CountBar, LogPanel, NoticeBar
@@ -53,7 +55,7 @@ class GatedNoteSource:
 
 def make_app(vault, source=None, **overrides) -> AnkiImporterApp:
     """An app pointed at `vault`, without going through the UI."""
-    app = AnkiImporterApp()
+    app = AnkiImporterApp(config_path=str(Path(vault) / "test-config.toml"))
     app.load_settings_from(
         RunSettings(
             vault_path=str(vault),
@@ -350,3 +352,101 @@ class TestCancelling:
 
             assert app.stage is Stage.CANCELLED
             assert app.query_one(CardTable).fronts == []
+
+
+class TestTheConfigScreen:
+    async def test_the_config_screen_shows_the_settings_in_use(self, vault):
+        app = make_app(vault)
+        app.load_settings_from(
+            RunSettings(vault_path=str(vault), deck_name="Maths", root_notes=("Indice",))
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+
+            screen = app.screen
+            assert screen.query_one("#config-deck", Input).value == "Maths"
+            assert screen.query_one("#config-roots", Input).value == "Indice"
+
+    async def test_saving_from_the_config_screen_updates_the_app_and_the_file(
+        self, vault, config_file
+    ):
+        app = make_app(vault)
+        app.config_path = config_file
+
+        async with app.run_test() as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            screen = app.screen
+            screen.query_one("#config-deck", Input).value = "Maths"
+            screen.query_one("#config-upsert", Switch).value = True
+            await pilot.click("#config-save")
+            await pilot.pause()
+
+            assert app.settings.deck_name == "Maths"
+            assert app.settings.upsert is True
+            assert load_settings(config_file).deck_name == "Maths"
+
+    async def test_closing_the_config_screen_without_saving_changes_nothing(
+        self, vault, config_file
+    ):
+        app = make_app(vault)
+        app.config_path = config_file
+
+        async with app.run_test() as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            screen = app.screen
+            screen.query_one("#config-deck", Input).value = "Changed"
+            await pilot.press("escape")
+            await pilot.pause()
+
+            assert app.settings.deck_name == "Default"
+            assert not config_file.exists()
+
+    async def test_the_app_starts_with_whatever_was_saved_last(
+        self, vault, config_file
+    ):
+        save_settings(
+            RunSettings(
+                vault_path=str(vault), deck_name="Maths", root_notes=("root_note",)
+            ),
+            config_file,
+        )
+        app = AnkiImporterApp(config_path=config_file)
+
+        async with app.run_test():
+            assert app.settings.deck_name == "Maths"
+            assert app.query_one("#vault-path", Input).value == str(vault)
+            assert app.query_one("#root-notes", Input).value == "root_note"
+
+    async def test_every_run_setting_has_a_field_on_the_config_screen(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            screen = app.screen
+
+            for field in (
+                "#config-vault",
+                "#config-deck",
+                "#config-roots",
+                "#config-prefix",
+                "#config-upsert",
+                "#config-links",
+            ):
+                assert screen.query_one(field)
+
+
+@pytest.fixture
+def config_file(tmp_path):
+    return tmp_path / "anki-importer.toml"
+
+
+@pytest.fixture
+def gateway():
+    from tests.test_import_run import FakeAnkiGateway
+
+    return FakeAnkiGateway()

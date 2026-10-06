@@ -35,3 +35,6 @@ workspace/
 .cache/
 *.cache
 vaults/
+
+# The app's own saved settings
+anki-importer.toml

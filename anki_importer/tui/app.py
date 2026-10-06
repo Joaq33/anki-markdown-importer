@@ -6,6 +6,7 @@ back as events, so a long import never freezes the interface and can be stopped.
 
 import queue
 from collections.abc import Callable
+from pathlib import Path
 
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -29,6 +30,8 @@ from ..import_run import (
 from ..notes import FolderNoteSource, NoteSource
 from ..stage import Stage
 from ..logging_setup import remove_sink, take_over_terminal
+from ..settings_store import DEFAULT_FILE_NAME, load_settings, save_settings
+from .screens import ConfigScreen
 from .widgets import CardTable, CountBar, LogPanel, NoticeBar
 
 
@@ -51,12 +54,14 @@ class AnkiImporterApp(App[None]):
         Binding("r", "run", "Run"),
         Binding("escape", "cancel", "Cancel"),
         Binding("l", "log_panel", "Logs"),
+        Binding("c", "config", "Settings"),
         Binding("q", "quit", "Quit"),
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, config_path: str | Path | None = None) -> None:
         super().__init__()
-        self.settings = RunSettings(vault_path="")
+        self.config_path = Path(config_path) if config_path else Path.cwd() / DEFAULT_FILE_NAME
+        self.settings = load_settings(self.config_path)
         self.source: NoteSource | None = None
         # Where notes come from. Overridable so tests can hold a run open.
         self.source_factory: Callable[[str], NoteSource] = FolderNoteSource
@@ -172,6 +177,17 @@ class AnkiImporterApp(App[None]):
     @on(Button.Pressed, "#run")
     def _on_run_pressed(self) -> None:
         self.start_dry_run()
+
+    def action_config(self) -> None:
+        """Open the settings screen, and keep what is saved there."""
+        self.push_screen(ConfigScreen(self.settings), self._on_settings_saved)
+
+    def _on_settings_saved(self, settings: RunSettings | None) -> None:
+        if settings is None:
+            return
+        self.settings = settings
+        save_settings(settings, self.config_path)
+        self.sync_inputs()
 
     def report_found(self, found: int, problems: list[str]) -> None:
         """Say how many notes a dry run found, and what went wrong."""
