@@ -1,12 +1,15 @@
 """Tests for the app's dry run: the first thing a user can actually do."""
 
+import threading
+
 import pytest
+from textual.widgets import ProgressBar
 
 from anki_importer.import_run import ImportRun, RunSettings
 from anki_importer.notes import FolderNoteSource
 from anki_importer.stage import Stage
 from anki_importer.tui.app import AnkiImporterApp
-from anki_importer.tui.widgets import CardTable, NoticeBar
+from anki_importer.tui.widgets import CardTable, CountBar, LogPanel, NoticeBar
 
 LINKED_PAIR = {
     "root_note.md": "---\ntags: [root]\n---\n# Root\nSee [[linked_note]].\n",
@@ -22,7 +25,33 @@ def vault(tmp_path):
     return tmp_path
 
 
-def make_app(vault, **overrides) -> AnkiImporterApp:
+@pytest.fixture
+def big_vault(tmp_path):
+    """A vault with enough notes that a run is still going when we look."""
+    for index in range(400):
+        (tmp_path / f"note_{index:03d}.md").write_text(f"note {index}\n", "utf-8")
+    (tmp_path / "root_note.md").write_text(
+        "\n".join(f"[[note_{index:03d}]]" for index in range(400)), "utf-8"
+    )
+    return tmp_path
+
+
+class GatedNoteSource:
+    """A vault that can be held shut, so a run can be caught while it works."""
+
+    def __init__(self, vault):
+        self._inner = FolderNoteSource(vault)
+        self.opened = threading.Event()
+
+    def read(self, name):
+        self.opened.wait(10)
+        return self._inner.read(name)
+
+    def open(self):
+        self.opened.set()
+
+
+def make_app(vault, source=None, **overrides) -> AnkiImporterApp:
     """An app pointed at `vault`, without going through the UI."""
     app = AnkiImporterApp()
     app.load_settings_from(
@@ -33,6 +62,8 @@ def make_app(vault, **overrides) -> AnkiImporterApp:
             **overrides,
         )
     )
+    if source is not None:
+        app.source_factory = lambda _path: source
     return app
 
 
@@ -178,3 +209,144 @@ class TestProblemsAreReportedNotRaised:
             assert any(
                 "nowhere" in problem for problem in app.query_one(NoticeBar).problems
             )
+
+class TestProgress:
+    async def test_a_dry_run_shows_how_far_along_it_is(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+
+            assert app.query_one(ProgressBar).total == 2
+            assert app.query_one(ProgressBar).progress == 2
+
+    async def test_progress_starts_at_nothing_done(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+
+            assert app.query_one(ProgressBar).total is not None
+
+    async def test_the_app_says_it_is_working_while_a_run_is_in_flight(self, vault):
+        source = GatedNoteSource(vault)
+        app = make_app(vault, source=source)
+
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            await pilot.pause()
+
+            assert app.query_one(NoticeBar).notice == Stage.DISCOVERING.message
+
+            source.open()
+            await app.workers.wait_for_complete()
+            assert app.query_one(CardTable).fronts
+
+    async def test_the_counts_say_how_many_notes_were_found_and_how_many_are_missing(
+        self, vault
+    ):
+        (vault / "root_note.md").write_text("[[nowhere]]\n[[linked_note]]\n", "utf-8")
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+
+            counts = app.query_one(CountBar).counts
+            assert counts["found"] == 2
+            assert counts["missing"] == 1
+
+
+class TestTheLogPanel:
+    async def test_the_panels_hold_the_runs_log_output(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+
+            panel = app.query_one(LogPanel)
+            assert any("root_note" in line for line in panel.entries)
+
+    async def test_a_problem_is_shown_in_the_log_as_well_as_the_notice(self, vault):
+        (vault / "root_note.md").write_text("[[nowhere]]\n", encoding="utf-8")
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+
+            assert any("nowhere" in line for line in app.query_one(LogPanel).entries)
+
+    async def test_nothing_is_printed_outside_the_app_while_it_runs(
+        self, vault, capsys
+    ):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+
+        printed = capsys.readouterr()
+        assert printed.out == ""
+        assert printed.err == ""
+
+    async def test_the_panel_can_be_hidden_and_shown_again(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            panel = app.query_one(LogPanel)
+            await pilot.press("l")
+            assert panel.display is False
+            await pilot.press("l")
+            assert panel.display is True
+
+
+class TestCancelling:
+    async def test_cancelling_stops_the_run(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+            await pilot.press("escape")
+
+            assert app.stage is Stage.CANCELLED
+
+    async def test_cancelling_keeps_the_notes_already_found(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+            await pilot.press("escape")
+
+            assert app.query_one(CardTable).fronts
+
+    async def test_the_app_is_ready_to_run_again_after_a_cancelled_run(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+            await pilot.press("escape")
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+
+            assert app.query_one(CardTable).fronts
+
+    async def test_cancelling_a_run_that_is_still_going_stops_it_quickly(self, vault):
+        source = GatedNoteSource(vault)
+        app = make_app(vault, source=source)
+
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            await pilot.pause()
+            await pilot.press("escape")
+            source.open()
+            await app.workers.wait_for_complete()
+
+            assert app.stage is Stage.CANCELLED
+            assert app.query_one(CardTable).fronts == []

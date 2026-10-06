@@ -42,6 +42,16 @@ def remove_sink(handler_id: int) -> None:
     log.remove(handler_id)
 
 
+def take_over_terminal(sink: LogSink, level: str = "INFO") -> int:
+    """Stop logging to the terminal and hand every line to `sink` instead.
+
+    A full-screen app owns the terminal: loguru's default handler would print
+    straight through the UI, so it is removed before the app takes over.
+    """
+    log.remove()
+    return add_sink(sink, level=level)
+
+
 def add_stdout_sink(level: str = "INFO") -> int:
     """For running headless, where the terminal is ours to use."""
     import sys

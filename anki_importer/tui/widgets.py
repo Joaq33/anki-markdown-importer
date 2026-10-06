@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from textual.widgets import DataTable, Static
+from textual.widgets import DataTable, RichLog, Static
 
 from ..card import Card
 
@@ -88,3 +88,48 @@ class NoticeBar(Static):
     def _set(self, text: str) -> None:
         self.notice = text
         self.update(text)
+
+class CountBar(Static):
+    """The running tally of what a run has done so far."""
+
+    def __init__(self, id: str | None = None) -> None:
+        super().__init__("", id=id)
+        self.counts: dict[str, int] = {"found": 0, "missing": 0, "processed": 0}
+
+    def tally(self, found: int, missing: int, processed: int = 0) -> None:
+        self.counts = {"found": found, "missing": missing, "processed": processed}
+        self.update(self._text())
+
+    def reset(self) -> None:
+        self.tally(0, 0, 0)
+
+    def _text(self) -> str:
+        found = self.counts["found"]
+        parts = [f"found {found}"]
+        if self.counts["missing"]:
+            parts.append(f"missing {self.counts['missing']}")
+        if self.counts["processed"]:
+            parts.append(f"processed {self.counts['processed']}")
+        return "  ".join(parts)
+
+
+class LogPanel(RichLog):
+    """The run's own log, so nothing has to be printed under the app."""
+
+    def __init__(self, id: str | None = None) -> None:
+        super().__init__(id=id, wrap=True, highlight=False, markup=False)
+        self.entries: list[str] = []
+
+    def add_line(self, line: str) -> None:
+        self.entries.append(line)
+        self.write(line)
+
+    def clear_entries(self) -> None:
+        self.entries.clear()
+        self.clear()
+
+    def hide_panel(self) -> None:
+        self.display = False
+
+    def show_panel(self) -> None:
+        self.display = True

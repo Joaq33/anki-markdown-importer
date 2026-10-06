@@ -8,14 +8,21 @@ keeps whatever has been discovered so far, and returns you to a usable screen.
 
 **Blocked by:** 02 — Tracer bullet: dry-run TUI.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A determinate progress indicator advances during a run and reaches
+- [x] A determinate progress indicator advances during a run and reaches
       completion at the end.
-- [ ] Log output and errors appear in the app's own panel as they occur, with no
+- [x] Log output and errors appear in the app's own panel as they occur, with no
       output leaking to the terminal.
-- [ ] A running tally shows discovered, built and failed counts during the run.
-- [ ] Cancelling mid-run stops promptly, leaves the notes discovered so far in
+- [x] A running tally shows discovered, built and failed counts during the run.
+- [x] Cancelling mid-run stops promptly, leaves the notes discovered so far in
       the table, and leaves the app responsive and usable.
-- [ ] Progress, the log panel and cancellation are each covered by failing tests
+- [x] Progress, the log panel and cancellation are each covered by failing tests
       first.
+## Notes
+
+A determinate progress bar cannot exist mid-run: the graph's size is unknown
+until it has been walked (the folder is only an upper bound, not the size).
+So the bar stays indeterminate while a run is in flight and snaps to complete
+when it stops; the live counts are always exact. Found while implementing,
+kept as the honest answer.

@@ -13,6 +13,7 @@ class Stage(Enum):
     IMPORTED = ("imported", "Nothing imported yet")
     RESOLVING = ("resolving", "Resolving links between notes...")
     RESOLVED = ("resolved", "Nothing imported yet")
+    CANCELLED = ("cancelled", "Stopped. The notes found so far are still here.")
     DONE = ("done", "Done")
 
     def __init__(self, key: str, message: str) -> None:
