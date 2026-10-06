@@ -12,7 +12,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Footer, Header, Input, Label, ProgressBar
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, ProgressBar
 
 from ..card import Card
 from ..gateway import AnkiConnectGateway, AnkiGateway
@@ -34,7 +34,7 @@ from ..notes import FolderNoteSource, NoteSource
 from ..stage import Stage
 from ..logging_setup import remove_sink, take_over_terminal
 from ..settings_store import DEFAULT_FILE_NAME, load_settings, save_settings
-from .screens import ConfigScreen
+from .screens import CardDetailScreen, ConfigScreen
 from .widgets import CardTable, CountBar, LogPanel, NoticeBar
 
 
@@ -56,6 +56,7 @@ class AnkiImporterApp(App[None]):
     BINDINGS = [
         Binding("r", "run", "Run"),
         Binding("s", "submit", "Import"),
+        Binding("e", "inspect", "Inspect"),
         Binding("escape", "cancel", "Cancel"),
         Binding("l", "log_panel", "Logs"),
         Binding("c", "config", "Settings"),
@@ -351,6 +352,35 @@ class AnkiImporterApp(App[None]):
         self.stage = Stage.IMPORTED
         self.problems = problems
         self.query_one(NoticeBar).report(f"Imported {summary.processed} {noun}: {parts}", problems)
+
+    # -- inspecting one card -----------------------------------------------
+
+    def action_inspect(self) -> None:
+        """Open the card under the cursor, for a closer look."""
+        index = self.query_one(CardTable).highlighted_index()
+        if index is None:
+            return
+        self._open_detail(index)
+
+    @on(DataTable.RowSelected)
+    def _on_row_selected(self, event: DataTable.RowSelected) -> None:
+        index = self.query_one(CardTable).highlighted_index()
+        if index is not None:
+            self._open_detail(index)
+
+    def _open_detail(self, index: int) -> None:
+        run = self.import_run
+        if run is None or not 0 <= index < len(run.cards):
+            return
+        self.push_screen(CardDetailScreen(index, run.cards[index]), self._on_detail_closed)
+
+    def _on_detail_closed(self, result: tuple[int, Card] | None) -> None:
+        if result is None or self.import_run is None:
+            return
+        index, card = result
+        self.import_run.cards[index] = card
+        self.query_one(CardTable).replace_at(index, card)
+        self.write_log(f"Updated '{card.front}'")
 
     def action_cancel(self) -> None:
         """Stop the run in flight, keeping whatever it has found."""

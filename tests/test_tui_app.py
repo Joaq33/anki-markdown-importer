@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from textual.widgets import Input, ProgressBar, Switch
+from textual.widgets import Input, ProgressBar, Static, Switch
 
 from anki_importer.card import Card
 from anki_importer.import_run import ImportRun, RunSettings
@@ -170,7 +170,8 @@ class TestWhatAListedCardShows:
             await pilot.press("r")
             await app.workers.wait_for_complete()
 
-            row = app.query_one(CardTable).row("root_note")
+            table = app.query_one(CardTable)
+            row = table.row(table.fronts.index("root_note"))
             assert row.front == "root_note"
             assert "calculus" in row.tags
 
@@ -184,7 +185,8 @@ class TestWhatAListedCardShows:
             await pilot.press("r")
             await app.workers.wait_for_complete()
 
-            assert app.query_one(CardTable).row("not_included_note").skipped is True
+            table = app.query_one(CardTable)
+            assert table.row(table.fronts.index("not_included_note")).skipped is True
 
 
 class TestProblemsAreReportedNotRaised:
@@ -579,3 +581,106 @@ class TestImportingFromTheApp:
 
             assert app.query_one(CountBar).counts["added"] <= 1
             assert app.stage is Stage.CANCELLED
+
+
+class TestInspectingACard:
+    async def _dry_run(self, app, pilot):
+        await pilot.press("r")
+        await app.workers.wait_for_complete()
+
+    async def test_opening_a_card_shows_its_front_tags_and_back(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("enter")
+            await pilot.pause()
+
+            screen = app.screen
+            assert screen.query_one("#detail-front", Input).value == "root_note"
+            assert "root" in screen.query_one("#detail-tags", Input).value
+            assert "Root" in str(screen.query_one("#detail-back", Static).content)
+
+    async def test_an_edited_front_is_what_gets_imported(self, vault, gateway):
+        app = make_app(vault)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("enter")
+            await pilot.pause()
+            app.screen.query_one("#detail-front", Input).value = "renamed"
+            await pilot.click("#detail-apply")
+            await pilot.pause()
+            app.start_submit()
+            await app.workers.wait_for_complete()
+
+            assert "renamed" in {card.front for card in gateway.notes.values()}
+
+    async def test_an_edit_stays_when_the_card_is_opened_again(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("enter")
+            await pilot.pause()
+            app.screen.query_one("#detail-front", Input).value = "renamed"
+            await pilot.click("#detail-apply")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert app.screen.query_one("#detail-front", Input).value == "renamed"
+
+    async def test_a_card_marked_to_skip_is_not_imported(self, vault, gateway):
+        (vault / "root_note.md").write_text(
+            "---\ntags: [root]\n---\n# Root\n[[not_included_note]]\n", encoding="utf-8"
+        )
+        app = make_app(vault)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            app.screen.query_one("#detail-skip", Switch).value = True
+            await pilot.click("#detail-apply")
+            await pilot.pause()
+            app.start_submit()
+            await app.workers.wait_for_complete()
+
+            counts = app.query_one(CountBar).counts
+            assert (counts["added"], counts["skipped"]) == (1, 1)
+
+    async def test_editing_one_card_leaves_the_others_alone(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("enter")
+            await pilot.pause()
+            app.screen.query_one("#detail-front", Input).value = "renamed"
+            await pilot.click("#detail-apply")
+            await pilot.pause()
+
+            assert sorted(app.query_one(CardTable).fronts) == [
+                "linked_note",
+                "renamed",
+            ]
+
+    async def test_closing_the_detail_without_applying_changes_nothing(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("enter")
+            await pilot.pause()
+            app.screen.query_one("#detail-front", Input).value = "renamed"
+            await pilot.press("escape")
+            await pilot.pause()
+
+            assert sorted(app.query_one(CardTable).fronts) == [
+                "linked_note",
+                "root_note",
+            ]

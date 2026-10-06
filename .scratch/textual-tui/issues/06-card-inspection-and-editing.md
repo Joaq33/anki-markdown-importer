@@ -7,14 +7,23 @@ to be left out of the run. What you see is what gets submitted.
 
 **Blocked by:** 05 — Live submission to AnkiConnect.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Selecting a card shows its front, its back as Anki would render it, and
+- [x] Selecting a card shows its front, its back as Anki would render it, and
       its tags.
-- [ ] You can change a card's front and tags, and mark a card to be skipped,
+- [x] You can change a card's front and tags, and mark a card to be skipped,
       and those changes are what get submitted.
-- [ ] Editing one card leaves the rest of the run untouched, including cards
+- [x] Editing one card leaves the rest of the run untouched, including cards
       already submitted.
-- [ ] Edits survive revisiting the card and submitting the run.
-- [ ] Selection, editing and skip-marking are each covered by failing tests
+- [x] Edits survive revisiting the card and submitting the run.
+- [x] Selection, editing and skip-marking are each covered by failing tests
       first.
+## Notes
+
+- The back cannot be edited, only viewed: Anki builds it, and editing
+  generated HTML by hand is a way to lose the plot. Front, tags and the skip
+  flag are what you can change.
+- The terminal cannot render Anki's HTML, so the detail shows a plain-text
+  reading of the back (one line per thought, list items bulleted).
+- The table's rows are keyed by position now, so renaming a card no longer
+  moves it.

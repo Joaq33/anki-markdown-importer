@@ -34,32 +34,46 @@ class CardTable(DataTable[str]):
 
     def __init__(self, id: str | None = None) -> None:
         super().__init__(id=id)
-        self._rows: dict[str, CardRow] = {}
+        self._rows: dict[int, CardRow] = {}
 
     def on_mount(self) -> None:
-        self.add_columns("Front", "Tags", "Status")
+        self.add_column("Front", key="front")
+        self.add_column("Tags", key="tags")
+        self.add_column("Status", key="status")
         self.cursor_type = "row"
         self.zebra_stripes = True
 
     @property
     def fronts(self) -> list[str]:
         """The fronts listed, in the order they were found."""
-        return list(self._rows)
+        return [row.front for row in self._rows.values()]
 
-    def row(self, front: str) -> CardRow:
-        return self._rows[front]
+    def row(self, index: int) -> CardRow:
+        return self._rows[index]
+
+    def highlighted_index(self) -> int | None:
+        """Which card the cursor is on, if the table lists anything."""
+        if not self._rows:
+            return None
+        return list(self._rows)[self.cursor_row]
 
     def add_card(self, card: Card) -> CardRow:
+        """Append a card at the end, keeping its position stable for edits."""
+        index = len(self._rows)
         row = CardRow.of(card)
-        self._rows[card.front] = row
-        self.add_row(row.front, row.tags, row.status, key=row.front)
+        self._rows[index] = row
+        self.add_row(row.front, row.tags, row.status, key=str(index))
         return row
 
-    def replace(self, previous: str, card: Card) -> CardRow:
-        """Show a card's new contents in place of its old ones."""
-        self.remove_row(previous)
-        del self._rows[previous]
-        return self.add_card(card)
+    def replace_at(self, index: int, card: Card) -> CardRow:
+        """Show a card's new contents in its own row."""
+        row = CardRow.of(card)
+        self._rows[index] = row
+        key = str(index)
+        self.update_cell(key, "front", row.front)
+        self.update_cell(key, "tags", row.tags)
+        self.update_cell(key, "status", row.status)
+        return row
 
     def clear_cards(self) -> None:
         self._rows.clear()

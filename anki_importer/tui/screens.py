@@ -2,11 +2,13 @@
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, Label, Switch
+from textual.widgets import Button, Footer, Header, Input, Label, Static, Switch
 
+from ..card import Card
 from ..import_run import RunSettings, parse_root_notes
+from ..preview import plain_preview
 
 
 class ConfigScreen(Screen[RunSettings | None]):
@@ -76,4 +78,73 @@ class ConfigScreen(Screen[RunSettings | None]):
             self.dismiss(None)
 
     def action_cancel(self) -> None:
+        self.dismiss(None)
+
+class CardDetailScreen(Screen[tuple[int, Card] | None]):
+    """One card, up close: what it says, what it is tagged, whether it goes.
+
+    Dismisses with the card's position and its edited self when applied,
+    or with nothing when closed without applying.
+    """
+
+    TITLE = "Card"
+    CSS = """
+    CardDetailScreen { align: center middle; }
+    #detail-box { width: 76; height: auto; max-height: 90%; border: solid $accent; padding: 1 2; }
+    #detail-box Label { width: 12; padding: 1 1 0 0; }
+    #detail-back { height: auto; max-height: 16; border: solid $primary; padding: 0 1; }
+    #detail-actions { height: auto; padding: 1 0 0 0; }
+    """
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+    ]
+
+    def __init__(self, index: int, card: Card) -> None:
+        super().__init__()
+        self.index = index
+        self.card = card
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Vertical(id="detail-box"):
+            with Horizontal():
+                yield Label("Front")
+                yield Input(self.card.front, id="detail-front")
+            with Horizontal():
+                yield Label("Tags")
+                yield Input(", ".join(sorted(self.card.tags)), id="detail-tags")
+            with Horizontal():
+                yield Label("Skip")
+                yield Switch(self.card.should_skip, id="detail-skip")
+            yield Label("Back, as Anki will show it")
+            with VerticalScroll(id="detail-back-scroll"):
+                yield Static(plain_preview(self.card.back), id="detail-back")
+            with Horizontal(id="detail-actions"):
+                yield Button("Apply", id="detail-apply", variant="primary")
+                yield Button("Close", id="detail-close")
+        yield Footer()
+
+    def read_card(self) -> Card:
+        """The card as edited, keeping everything the screen cannot change."""
+        tags = {
+            tag.strip()
+            for tag in self.query_one("#detail-tags", Input).value.split(",")
+            if tag.strip()
+        }
+        return Card(
+            front=self.query_one("#detail-front", Input).value,
+            back=self.card.back,
+            frontmatter=self.card.frontmatter,
+            staged_content=self.card.staged_content,
+            should_skip=self.query_one("#detail-skip", Switch).value,
+            tags=tags,
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "detail-apply":
+            self.dismiss((self.index, self.read_card()))
+        else:
+            self.dismiss(None)
+
+    def action_close(self) -> None:
         self.dismiss(None)
