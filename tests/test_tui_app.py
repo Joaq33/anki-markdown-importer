@@ -1,6 +1,8 @@
 """Tests for the app's dry run: the first thing a user can actually do."""
 
+import asyncio
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -68,6 +70,14 @@ class GatedNoteSource:
 
     def open(self):
         self.opened.set()
+
+
+async def wait_for_text(app, text: str, timeout: float = 10.0) -> None:
+    """Wait until the notice bar says `text`, however many steps that takes."""
+    start = time.monotonic()
+    while text not in app.query_one(NoticeBar).notice:
+        assert time.monotonic() - start < timeout, app.query_one(NoticeBar).notice
+        await asyncio.sleep(0.05)
 
 
 def make_app(vault, source=None, **overrides) -> AnkiImporterApp:
@@ -684,3 +694,96 @@ class TestInspectingACard:
                 "linked_note",
                 "root_note",
             ]
+
+
+class TestResolvingLinks:
+    async def _dry_run(self, app, pilot):
+        await pilot.press("r")
+        await app.workers.wait_for_complete()
+
+    async def _submit(self, app, pilot):
+        await pilot.press("s")
+        await app.workers.wait_for_complete()
+
+    async def test_importing_continues_into_resolving_links_on_its_own(
+        self, vault, gateway
+    ):
+        app = make_app(vault)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await self._submit(app, pilot)
+            await wait_for_text(app, "links resolved")
+
+            assert app.stage is Stage.RESOLVED
+
+    async def test_the_final_count_says_how_many_links_resolved(
+        self, vault, gateway
+    ):
+        app = make_app(vault)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await self._submit(app, pilot)
+            await wait_for_text(app, "2 links resolved")
+
+    async def test_a_link_that_cannot_be_resolved_names_the_note_to_fix(
+        self, vault, gateway
+    ):
+        (vault / "root_note.md").write_text("See [[nowhere]].\n", encoding="utf-8")
+        app = make_app(vault)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await self._submit(app, pilot)
+            await wait_for_text(app, "could not be resolved")
+
+            assert "nowhere" in app.query_one(NoticeBar).notice
+
+    async def test_when_nothing_links_anywhere_it_says_so(self, vault, gateway):
+        (vault / "root_note.md").write_text("Just text.\n", encoding="utf-8")
+        (vault / "linked_note.md").write_text("Just text.\n", encoding="utf-8")
+        app = make_app(vault)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await self._submit(app, pilot)
+            await wait_for_text(app, "No links")
+
+            assert app.stage is Stage.RESOLVED
+
+    async def test_with_link_generation_off_the_step_is_visibly_skipped(
+        self, vault, gateway
+    ):
+        app = make_app(vault, generate_links=False)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await self._submit(app, pilot)
+            await wait_for_text(app, "Imported")
+
+            assert app.stage is Stage.IMPORTED
+            assert any(
+                "skipping link resolution" in line
+                for line in app.query_one(LogPanel).entries
+            )
+
+    async def test_cancelling_an_import_does_not_resolve_links(self, vault):
+        held = SlowGateway()
+        app = make_app(vault)
+        app.gateway = held
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("s")
+            await pilot.pause()
+            await pilot.press("escape")
+            held.release()
+            await app.workers.wait_for_complete()
+
+            assert app.stage is Stage.CANCELLED

@@ -9,15 +9,20 @@ the logs.
 
 **Blocked by:** 05 — Live submission to AnkiConnect.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Link resolution runs as its own visible step after submission, with
+- [x] Link resolution runs as its own visible step after submission, with
       progress as it goes.
-- [ ] The final summary reports how many links were resolved and how many were
+- [x] The final summary reports how many links were resolved and how many were
       not.
-- [ ] Every unresolved link names the note whose target could not be found, so
+- [x] Every unresolved link names the note whose target could not be found, so
       you can go fix the wiki-link.
-- [ ] The second pass runs only when link generation is enabled, and the step is
+- [x] The second pass runs only when link generation is enabled, and the step is
       skipped visibly when it is not.
-- [ ] Resolution counts and unresolved-target reporting are covered by failing
+- [x] Resolution counts and unresolved-target reporting are covered by failing
       tests first, with no real Anki needed.
+## Notes
+
+- The pass follows an import automatically, in the same worker: chaining a
+  second exclusive worker cancelled its own predecessor. It is still its own
+  visible step (its own stage, progress and summary).

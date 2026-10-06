@@ -21,6 +21,9 @@ from ..import_run import (
     CardBuilt,
     CardSubmitted,
     ImportRun,
+    LinkEvent,
+    LinkProgress,
+    LinksResolved,
     NoteDiscovered,
     NoteUnreadable,
     RunFinished,
@@ -319,6 +322,20 @@ class AnkiImporterApp(App[None]):
                 self.call_from_thread(self._on_submit_event, event)
         except Exception as error:
             self.call_from_thread(self.announce, Stage.IDLE, [str(error)])
+            return
+        if run.cancelled:
+            return
+        if not self.settings.generate_links:
+            self.call_from_thread(
+                self.write_log, "Link generation is off - skipping link resolution"
+            )
+            return
+        self.call_from_thread(self._begin_resolution)
+        try:
+            for link_event in run.resolve_links(gateway):
+                self.call_from_thread(self._on_link_event, link_event)
+        except Exception as error:
+            self.call_from_thread(self.announce, Stage.IDLE, [str(error)])
 
     def _on_submit_event(self, event: SubmitEvent) -> None:
         match event:
@@ -352,6 +369,47 @@ class AnkiImporterApp(App[None]):
         self.stage = Stage.IMPORTED
         self.problems = problems
         self.query_one(NoticeBar).report(f"Imported {summary.processed} {noun}: {parts}", problems)
+
+    def _begin_resolution(self) -> None:
+        """Announce the link pass, which follows an import in the same run."""
+        self.announce(Stage.RESOLVING)
+        progress = self.query_one(ProgressBar)
+        progress.total = None
+        progress.progress = 0
+
+    def _on_link_event(self, event: LinkEvent) -> None:
+        match event:
+            case LinkProgress(resolved, unresolved):
+                done = resolved + unresolved
+                self.query_one(NoticeBar).report(
+                    f"{Stage.RESOLVING.message} ({done} so far)"
+                )
+            case LinksResolved(resolution):
+                self._finish_links(resolution.resolved, resolution.unresolved, resolution.unresolved_targets)
+
+    def _finish_links(
+        self, resolved: int, unresolved: int, targets: tuple[str, ...]
+    ) -> None:
+        """Say what the link pass did, naming every target it could not find."""
+        progress = self.query_one(ProgressBar)
+        progress.total = 1
+        progress.progress = 1
+        notice: str
+        problems: list[str]
+        if resolved == 0 and unresolved == 0:
+            notice, problems = "No links needed resolving", []
+        else:
+            noun = "link" if resolved == 1 else "links"
+            notice = f"{resolved} {noun} resolved"
+            problems = []
+            if unresolved:
+                missing = "link" if unresolved == 1 else "links"
+                names = ", ".join(f"'{target}'" for target in targets)
+                notice += f", {unresolved} {missing} could not be resolved: {names}"
+                problems = [f"could not resolve {names}"]
+        self.stage = Stage.RESOLVED
+        self.problems = problems
+        self.query_one(NoticeBar).report(notice, problems)
 
     # -- inspecting one card -----------------------------------------------
 
