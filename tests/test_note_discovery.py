@@ -5,7 +5,13 @@ Expectations are literals observed from the importer before the prefactor.
 
 import pytest
 
-from anki_importer.notes import FolderNoteSource, NoteDiscovery, NoteFound, NoteMissing
+from anki_importer.notes import (
+    FolderNoteSource,
+    NoteDiscovery,
+    NoteFound,
+    NoteMissing,
+    list_note_names,
+)
 
 SAMPLE_NOTES = {
     "root_note.md": "---\ntags: [root]\n---\n# Root Note\n[[linked_note]]\n[[not_included_note]]\n",
@@ -106,3 +112,22 @@ class TestNoteSource:
     def test_a_source_for_a_folder_that_does_not_exist_cannot_be_opened(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             FolderNoteSource(tmp_path / "nowhere")
+
+class TestListingNotes:
+    def test_listing_names_every_note_in_the_vault_by_its_stem(self, vault):
+        assert list_note_names(vault) == [
+            "linked_note",
+            "not_included_note",
+            "root_note",
+        ]
+
+    def test_listing_ignores_anything_that_is_not_a_note(self, tmp_path):
+        (tmp_path / "note.md").write_text("# N\n", encoding="utf-8")
+        (tmp_path / "photo.png").write_text("x", encoding="utf-8")
+        (tmp_path / "sub").mkdir()
+
+        assert list_note_names(tmp_path) == ["note"]
+
+    def test_listing_a_folder_that_does_not_exist_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            list_note_names(tmp_path / "nowhere")

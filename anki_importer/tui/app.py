@@ -37,7 +37,15 @@ from ..notes import FolderNoteSource, NoteSource
 from ..stage import Stage
 from ..logging_setup import remove_sink, take_over_terminal
 from ..settings_store import DEFAULT_FILE_NAME, load_settings, save_settings
-from .screens import CardDetailScreen, ConfigScreen, HelpScreen
+from ..notes import list_note_names
+from .screens import (
+    CardDetailScreen,
+    ConfigScreen,
+    FolderPickerScreen,
+    HelpScreen,
+    RootNotesScreen,
+)
+from .suggesters import NoteSuggester
 from .widgets import CardTable, CountBar, LogPanel, NoticeBar
 
 
@@ -50,6 +58,7 @@ class AnkiImporterApp(App[None]):
     #controls .field { height: 3; margin-bottom: 1; }
     #controls Label { width: 14; padding: 1 1 0 0; color: $text-muted; }
     #vault-path, #root-notes { width: 1fr; }
+    #controls .field Button { width: auto; margin-left: 1; }
     #buttons { height: 3; }
     #buttons Button { margin-right: 1; }
     #notice { height: auto; min-height: 2; padding: 1 2 0 2; text-style: bold; }
@@ -80,6 +89,7 @@ class AnkiImporterApp(App[None]):
         self.import_run: ImportRun | None = None
         self.stage = Stage.IDLE
         self.problems: list[str] = []
+        self.known_decks: tuple[str, ...] = ()
         self._mounted = False
         self._log_sink: int | None = None
         # Log lines can arrive from a worker thread, so they queue up and the
@@ -94,9 +104,11 @@ class AnkiImporterApp(App[None]):
             with Horizontal(classes="field"):
                 yield Label("Vault folder")
                 yield Input(placeholder="vaults/mi-vault", id="vault-path")
+                yield Button("Browse", id="browse")
             with Horizontal(classes="field"):
                 yield Label("Root notes")
                 yield Input(placeholder="Root notes, comma separated", id="root-notes")
+                yield Button("Roots", id="pick-roots")
             with Horizontal(id="buttons"):
                 yield Button("Run dry run", id="run", variant="primary")
                 yield Button("Import into Anki", id="submit", variant="success")
@@ -112,6 +124,8 @@ class AnkiImporterApp(App[None]):
         self._log_sink = take_over_terminal(self._queue_log_line)
         self.set_interval(0.05, self._drain_log_queue)
         self.sync_inputs()
+        self.refresh_suggesters()
+        self._load_deck_names()
         # Determinate and empty: nothing is running, and a pulsing bar would
         # lie about that (as well as never rendering the same frame twice).
         self.query_one(ProgressBar).update(total=1, progress=0)
@@ -168,6 +182,30 @@ class AnkiImporterApp(App[None]):
         self.settings = settings
         self.sync_inputs()
 
+    def refresh_suggesters(self) -> None:
+        """Offer the vault's note names while roots are typed."""
+        if not self._mounted:
+            return
+        folder = self.query_one("#vault-path", Input).value.strip()
+        try:
+            notes = list_note_names(folder)
+        except FileNotFoundError:
+            notes = []
+        self.query_one("#root-notes", Input).suggester = NoteSuggester(notes)
+
+    @work(thread=True)
+    def _load_deck_names(self) -> None:
+        """Ask Anki what decks it knows, when it can be asked at all."""
+        gateway = self.gateway or AnkiConnectGateway()
+        try:
+            if gateway.is_available():
+                self.call_from_thread(self._store_decks, gateway.deck_names())
+        except Exception:
+            pass
+
+    def _store_decks(self, names: list[str]) -> None:
+        self.known_decks = tuple(names)
+
     def read_settings_from_inputs(self) -> RunSettings:
         """The settings as typed in the fields, keeping the rest as configured."""
         if not self._mounted:
@@ -214,7 +252,43 @@ class AnkiImporterApp(App[None]):
 
     def action_config(self) -> None:
         """Open the settings screen, and keep what is saved there."""
-        self.push_screen(ConfigScreen(self.settings), self._on_settings_saved)
+        self.push_screen(
+            ConfigScreen(self.settings, deck_names=self.known_decks),
+            self._on_settings_saved,
+        )
+
+    @on(Button.Pressed, "#browse")
+    def _on_browse_pressed(self) -> None:
+        self.push_screen(
+            FolderPickerScreen(self.query_one("#vault-path", Input).value.strip()),
+            self._on_folder_picked,
+        )
+
+    def _on_folder_picked(self, folder: str | None) -> None:
+        if folder is None:
+            return
+        field = self.query_one("#vault-path", Input)
+        field.value = folder
+        field.cursor_position = len(folder)
+        self.refresh_suggesters()
+
+    @on(Button.Pressed, "#pick-roots")
+    def _on_pick_roots_pressed(self) -> None:
+        folder = self.query_one("#vault-path", Input).value.strip()
+        try:
+            notes = list_note_names(folder)
+        except FileNotFoundError as error:
+            self.announce(Stage.IDLE, [str(error)])
+            return
+        current = parse_root_notes(self.query_one("#root-notes", Input).value)
+        self.push_screen(RootNotesScreen(notes, current), self._on_roots_picked)
+
+    def _on_roots_picked(self, roots: tuple[str, ...] | None) -> None:
+        if roots is None:
+            return
+        field = self.query_one("#root-notes", Input)
+        field.value = ", ".join(roots)
+        field.cursor_position = len(field.value)
 
     def _on_settings_saved(self, settings: RunSettings | None) -> None:
         if settings is None:

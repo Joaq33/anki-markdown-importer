@@ -15,7 +15,7 @@ from anki_importer.notes import FolderNoteSource
 from anki_importer.settings_store import load_settings, save_settings
 from anki_importer.stage import Stage
 from anki_importer.tui.app import AnkiImporterApp
-from anki_importer.tui.screens import HelpScreen
+from anki_importer.tui.screens import FolderPickerScreen, HelpScreen, RootNotesScreen
 from anki_importer.tui.widgets import CardTable, CountBar, LogPanel, NoticeBar
 
 LINKED_PAIR = {
@@ -952,3 +952,105 @@ class TestReviewFixes:
             from anki_importer.tui.screens import CardDetailScreen
 
             assert not isinstance(app.screen, CardDetailScreen)
+
+
+class TestPickers:
+    async def test_browse_opens_a_folder_picker(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.click("#browse")
+            await pilot.pause()
+
+            assert isinstance(app.screen, FolderPickerScreen)
+
+    async def test_choosing_a_folder_fills_the_vault_field(self, tmp_path):
+        real = tmp_path / "vault"
+        real.mkdir()
+        (real / "note.md").write_text("# N\n", encoding="utf-8")
+        app = make_app(tmp_path)
+
+        async with app.run_test() as pilot:
+            await pilot.click("#browse")
+            await pilot.pause()
+            await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.click("#picker-use")
+            await pilot.pause()
+
+            assert app.query_one("#vault-path", Input).value == str(real)
+
+    async def test_roots_opens_a_checklist_of_the_vaults_notes(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.click("#pick-roots")
+            await pilot.pause()
+
+            screen = app.screen
+            assert isinstance(screen, RootNotesScreen)
+            assert screen.shown_notes() == [
+                "linked_note",
+                "not_included_note",
+                "root_note",
+            ]
+            assert screen.chosen_notes() == ["root_note"]
+
+    async def test_applying_the_checklist_fills_the_roots_field(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.click("#pick-roots")
+            await pilot.pause()
+            await pilot.press("space")
+            await pilot.click("#roots-apply")
+            await pilot.pause()
+
+            assert app.query_one("#root-notes", Input).value == (
+                "root_note, linked_note"
+            )
+
+    async def test_a_checklist_for_a_missing_vault_explains_itself(self, tmp_path):
+        app = make_app(tmp_path)
+        app.load_settings_from(
+            RunSettings(vault_path=str(tmp_path / "nowhere"), root_notes=("x",))
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.click("#pick-roots")
+            await pilot.pause()
+
+            assert "does not exist" in app.query_one(NoticeBar).notice
+
+    async def test_typing_a_note_name_suggests_the_rest(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            field = app.query_one("#root-notes", Input)
+            await pilot.click("#root-notes")
+            field.value = "root_note, link"
+            await pilot.pause()
+            await pilot.press("end")
+            await pilot.press("right")
+            await pilot.pause()
+
+            assert field.value == "root_note, linked_note"
+
+    async def test_the_deck_field_suggests_what_anki_knows(self, vault, gateway):
+        gateway.deck_names_list = ["Default", "Maths"]
+        app = make_app(vault)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("c")
+            await pilot.pause()
+            field = app.screen.query_one("#config-deck", Input)
+            await pilot.click("#config-deck")
+            field.value = "Ma"
+            await pilot.pause()
+            await pilot.press("end")
+            await pilot.press("right")
+            await pilot.pause()
+
+            assert field.value == "Maths"

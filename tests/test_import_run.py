@@ -31,6 +31,11 @@ LINKED_PAIR = {
 class FakeAnkiGateway:
     """An Anki that lives in memory."""
 
+    deck_names_list: list[str] = None
+
+    def deck_names(self) -> list[str]:
+        return list(self.deck_names_list) if self.deck_names_list else ["Default"]
+
     deck_name: str = "Default"
     online: bool = True
     notes: dict[int, Card] = field(default_factory=dict)

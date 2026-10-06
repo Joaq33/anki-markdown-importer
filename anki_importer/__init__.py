@@ -15,7 +15,14 @@ from .import_run import (
     RunSummary,
     parse_root_notes,
 )
-from .notes import FolderNoteSource, NoteDiscovery, NoteFound, NoteMissing, NoteSource
+from .notes import (
+    FolderNoteSource,
+    NoteDiscovery,
+    NoteFound,
+    NoteMissing,
+    NoteSource,
+    list_note_names,
+)
 
 __all__ = [
     "AnkiConnectGateway",

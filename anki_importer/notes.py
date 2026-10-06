@@ -69,6 +69,22 @@ class FolderNoteSource:
             f"Markdown file '{name}' not found in directory '{self.folder_path}'."
         )
 
+def list_note_names(folder_path: str | os.PathLike[str]) -> list[str]:
+    """Every note stem in a vault folder, sorted, without extensions."""
+    folder = os.fspath(folder_path)
+    try:
+        entries = os.listdir(folder)
+    except OSError as error:
+        raise FileNotFoundError(f"Folder '{folder}' does not exist.") from error
+    names = {
+        os.path.splitext(entry)[0]
+        for entry in entries
+        if entry.lower().endswith((".md", ".markdown"))
+        and os.path.isfile(os.path.join(folder, entry))
+    }
+    return sorted(names, key=str.casefold)
+
+
 class NoteDiscovery:
     """Walks the wiki-link graph breadth first from a set of root notes."""
 

@@ -44,3 +44,23 @@ def test_the_global_lookup_searches_every_deck(monkeypatch):
 
     assert AnkiConnectGateway().find_note_by_front("target") == 7
     assert sent[0]["params"]["query"] == 'Front:"target"'
+
+def test_deck_names_lists_what_anki_knows(monkeypatch):
+    class FakeResponse:
+        def json(self):
+            return {"result": ["Default", "Maths::Calc"], "error": None}
+
+    monkeypatch.setattr(
+        requests, "post", lambda url, json, timeout: FakeResponse()
+    )
+
+    assert AnkiConnectGateway().deck_names() == ["Default", "Maths::Calc"]
+
+
+def test_deck_names_is_empty_when_anki_is_silent(monkeypatch):
+    def failing(url, json, timeout):
+        raise requests.exceptions.ConnectionError
+
+    monkeypatch.setattr(requests, "post", failing)
+
+    assert AnkiConnectGateway().deck_names() == []

@@ -1,10 +1,26 @@
 """The screens the app can show, beyond the one it starts on."""
 
+from collections.abc import Iterable
+from pathlib import Path
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Static, Switch
+from textual.suggester import SuggestFromList
+from textual.widgets import (
+    Button,
+    DataTable,
+    DirectoryTree,
+    Footer,
+    Header,
+    Input,
+    Label,
+    SelectionList,
+    Static,
+    Switch,
+)
+from textual.widgets._selection_list import Selection
 
 from ..card import Card
 from ..import_run import RunSettings, parse_root_notes
@@ -29,9 +45,12 @@ class ConfigScreen(Screen[RunSettings | None]):
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    def __init__(self, settings: RunSettings) -> None:
+    def __init__(
+        self, settings: RunSettings, deck_names: tuple[str, ...] = ()
+    ) -> None:
         super().__init__()
         self.settings = settings
+        self._deck_names = deck_names
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -41,7 +60,13 @@ class ConfigScreen(Screen[RunSettings | None]):
                 yield Input(self.settings.vault_path, id="config-vault")
             with Horizontal():
                 yield Label("Deck name")
-                yield Input(self.settings.deck_name, id="config-deck")
+                yield Input(
+                    self.settings.deck_name,
+                    id="config-deck",
+                    suggester=SuggestFromList(
+                        self._deck_names, case_sensitive=False
+                    ),
+                )
             with Horizontal():
                 yield Label("Root notes")
                 yield Input(", ".join(self.settings.root_notes), id="config-roots")
@@ -209,4 +234,120 @@ class HelpScreen(Screen[None]):
         self.dismiss(None)
 
     def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class DirectoryPicker(DirectoryTree):
+    """A directory tree that only shows directories: you pick a vault, not a file."""
+
+    def filter_paths(self, paths: Iterable[Path]) -> Iterable[Path]:
+        return [path for path in paths if path.is_dir()]
+
+
+class FolderPickerScreen(Screen[str | None]):
+    """Choose the vault folder by pointing at it.
+
+    Dismisses with the chosen folder, or with nothing when cancelled.
+    """
+
+    TITLE = "Choose vault folder"
+    CSS = """
+    FolderPickerScreen { align: center middle; }
+    #picker-box { width: 76; height: 90%; border: solid $accent; padding: 1 2; }
+    #picker-current { height: auto; padding: 0 0 1 0; color: $text-muted; }
+    #picker-tree { height: 1fr; }
+    #picker-actions { height: auto; padding: 1 0 0 0; }
+    """
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, start: str) -> None:
+        super().__init__()
+        folder = Path(start) if start and Path(start).is_dir() else Path.cwd()
+        self._chosen = str(folder)
+        self._start = str(folder)
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Vertical(id="picker-box"):
+            yield Label(f"Folder: {self._chosen}", id="picker-current")
+            yield DirectoryPicker(self._start, id="picker-tree")
+            with Horizontal(id="picker-actions"):
+                yield Button("Use this folder", id="picker-use", variant="primary")
+                yield Button("Cancel", id="picker-cancel")
+        yield Footer()
+
+    def on_directory_tree_directory_selected(
+        self, event: DirectoryTree.DirectorySelected
+    ) -> None:
+        self._chosen = str(event.path)
+        self.query_one("#picker-current", Label).update(f"Folder: {self._chosen}")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "picker-use":
+            self.dismiss(self._chosen)
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class RootNotesScreen(Screen[tuple[str, ...] | None]):
+    """Tick the notes a run starts from.
+
+    Dismisses with the ticked notes, or with nothing when cancelled.
+    """
+
+    TITLE = "Choose root notes"
+    CSS = """
+    RootNotesScreen { align: center middle; }
+    #roots-box { width: 76; height: 90%; border: solid $accent; padding: 1 2; }
+    #roots-empty { height: auto; padding: 0 0 1 0; color: $warning; }
+    #roots-list { height: 1fr; }
+    #roots-actions { height: auto; padding: 1 0 0 0; }
+    """
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, notes: list[str], selected: tuple[str, ...]) -> None:
+        super().__init__()
+        self.notes = notes
+        self._selected = selected
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Vertical(id="roots-box"):
+            if not self.notes:
+                yield Label(
+                    "No notes in this folder yet - nothing to tick.",
+                    id="roots-empty",
+                )
+            yield SelectionList(
+                *[
+                    Selection(note, note, note in self._selected)
+                    for note in self.notes
+                ],
+                id="roots-list",
+            )
+            with Horizontal(id="roots-actions"):
+                yield Button("Apply", id="roots-apply", variant="primary")
+                yield Button("Cancel", id="roots-cancel")
+        yield Footer()
+
+    def shown_notes(self) -> list[str]:
+        return list(self.notes)
+
+    def chosen_notes(self) -> list[str]:
+        return list(self.query_one("#roots-list", SelectionList).selected)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "roots-apply":
+            self.dismiss(tuple(self.chosen_notes()))
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
         self.dismiss(None)

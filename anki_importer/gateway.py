@@ -43,6 +43,9 @@ class AnkiGateway(Protocol):
     def is_available(self) -> bool:
         """Whether AnkiConnect answered."""
 
+    def deck_names(self) -> list[str]:
+        """The decks Anki knows, or nothing when it cannot be asked."""
+
     def find_note_by_front(self, front: str) -> int | None:
         """The id of a note whose front matches, in any deck.
 
@@ -92,6 +95,14 @@ class AnkiConnectGateway:
         except (requests.exceptions.RequestException, ValueError):
             return False
         return isinstance(result, dict) and not result.get("error")
+
+    def deck_names(self) -> list[str]:
+        try:
+            result = self._call("deckNames")
+        except (requests.exceptions.RequestException, ValueError):
+            return []
+        names = result.get("result") or []
+        return [str(name) for name in names]
 
     def find_note_by_front(self, front: str) -> int | None:
         try:
