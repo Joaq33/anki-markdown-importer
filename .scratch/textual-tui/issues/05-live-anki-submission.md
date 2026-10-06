@@ -10,16 +10,23 @@ run stays cancellable.
 **Blocked by:** 03 — Progress, live log panel, and cancellation;
 04 — Config screen and persistence.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Before submitting, the app confirms it can reach AnkiConnect and reports a
+- [x] Before submitting, the app confirms it can reach AnkiConnect and reports a
       clear, actionable message when it cannot.
-- [ ] Submitting sends the discovered cards to the chosen deck and shows a live
+- [x] Submitting sends the discovered cards to the chosen deck and shows a live
       tally of added, updated, failed and skipped notes.
-- [ ] With upsert on, an existing note is updated rather than duplicated; with
+- [x] With upsert on, an existing note is updated rather than duplicated; with
       it off, a duplicate is skipped.
-- [ ] A note that fails to submit is reported and does not abort the rest of the
+- [x] A note that fails to submit is reported and does not abort the rest of the
       run.
-- [ ] Cancelling part-way stops submitting and keeps the counts accurate.
-- [ ] All submission behaviour is tested against a substituted gateway, with no
+- [x] Cancelling part-way stops submitting and keeps the counts accurate.
+- [x] All submission behaviour is tested against a substituted gateway, with no
       real Anki needed, written as failing tests first.
+## Notes
+
+- The submit and link-resolution passes themselves live in the core from ticket
+  01; this ticket is the UI around them.
+- The live integration test (against a real Anki on this machine) caught that
+  `is_available` treated AnkiConnect's `"error": null` as a failure. Fixed to
+  check truthiness.

@@ -15,16 +15,19 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, Input, Label, ProgressBar
 
 from ..card import Card
-from ..gateway import AnkiGateway
+from ..gateway import AnkiConnectGateway, AnkiGateway
 from ..import_run import (
     BuildEvent,
     CardBuilt,
+    CardSubmitted,
     ImportRun,
     NoteDiscovered,
     NoteUnreadable,
     RunFinished,
     RunSettings,
     RunStarted,
+    RunSummary,
+    SubmitEvent,
     parse_root_notes,
 )
 from ..notes import FolderNoteSource, NoteSource
@@ -52,6 +55,7 @@ class AnkiImporterApp(App[None]):
     """
     BINDINGS = [
         Binding("r", "run", "Run"),
+        Binding("s", "submit", "Import"),
         Binding("escape", "cancel", "Cancel"),
         Binding("l", "log_panel", "Logs"),
         Binding("c", "config", "Settings"),
@@ -88,6 +92,7 @@ class AnkiImporterApp(App[None]):
                 yield Input(placeholder="Root notes, comma separated", id="root-notes")
             with Horizontal(id="buttons"):
                 yield Button("Run dry run", id="run", variant="primary")
+                yield Button("Import into Anki", id="submit", variant="success")
         yield NoticeBar(Stage.IDLE.message, id="notice")
         yield CountBar(id="counts")
         yield ProgressBar(id="progress")
@@ -177,6 +182,10 @@ class AnkiImporterApp(App[None]):
     @on(Button.Pressed, "#run")
     def _on_run_pressed(self) -> None:
         self.start_dry_run()
+
+    @on(Button.Pressed, "#submit")
+    def _on_submit_pressed(self) -> None:
+        self.start_submit()
 
     def action_config(self) -> None:
         """Open the settings screen, and keep what is saved there."""
@@ -269,6 +278,79 @@ class AnkiImporterApp(App[None]):
         progress.total = found or 1
         progress.progress = found
         self.report_found(found, self.problems)
+
+    # -- importing into Anki -------------------------------------------------
+
+    def action_submit(self) -> None:
+        self.start_submit()
+
+    def start_submit(self) -> None:
+        """Send the cards from the last dry run to Anki."""
+        settings = self.read_settings_from_inputs()
+        self.settings = settings
+        gateway = self.gateway or AnkiConnectGateway()
+        self.gateway = gateway
+        run = self.import_run
+        if run is None or not run.cards:
+            self.announce(Stage.IDLE, ["Nothing to import yet - run a dry run first"])
+            return
+
+        self.announce(Stage.IMPORTING)
+        progress = self.query_one(ProgressBar)
+        progress.total = len(run.cards)
+        progress.progress = 0
+        self._submit(run, gateway)
+
+    @work(thread=True, exclusive=True, group="import")
+    def _submit(self, run: ImportRun, gateway: AnkiGateway) -> None:
+        if not gateway.is_available():
+            self.call_from_thread(
+                self.announce,
+                Stage.IDLE,
+                [
+                    "Could not reach Anki. "
+                    "Start it with the AnkiConnect add-on installed, then try again."
+                ],
+            )
+            return
+        try:
+            for event in run.submit(gateway):
+                self.call_from_thread(self._on_submit_event, event)
+        except Exception as error:
+            self.call_from_thread(self.announce, Stage.IDLE, [str(error)])
+
+    def _on_submit_event(self, event: SubmitEvent) -> None:
+        match event:
+            case CardSubmitted(front, outcome):
+                self.write_log(f"{outcome.value}: {front}")
+                if self.import_run is not None:
+                    self.query_one(CountBar).imported(self.import_run.summary)
+                    self.query_one(ProgressBar).progress = self.import_run.summary.processed
+            case RunSummary() as summary:
+                self.query_one(CountBar).imported(summary)
+                self._finish_submit(summary)
+
+    def _finish_submit(self, summary: RunSummary) -> None:
+        """Say what Anki did, unless cancelling already had the last word."""
+        run = self.import_run
+        if run is not None and run.cancelled:
+            self.announce(Stage.CANCELLED)
+            return
+        parts = ", ".join(
+            f"{value} {name}"
+            for name, value in (
+                ("added", summary.added),
+                ("updated", summary.updated),
+                ("skipped", summary.skipped),
+                ("failed", summary.failed),
+            )
+            if value
+        )
+        noun = "note" if summary.processed == 1 else "notes"
+        problems = [f"{summary.failed} failed to import"] if summary.failed else []
+        self.stage = Stage.IMPORTED
+        self.problems = problems
+        self.query_one(NoticeBar).report(f"Imported {summary.processed} {noun}: {parts}", problems)
 
     def action_cancel(self) -> None:
         """Stop the run in flight, keeping whatever it has found."""

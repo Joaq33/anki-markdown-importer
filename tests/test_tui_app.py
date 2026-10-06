@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 from textual.widgets import Input, ProgressBar, Switch
 
+from anki_importer.card import Card
 from anki_importer.import_run import ImportRun, RunSettings
+from tests.test_import_run import FakeAnkiGateway
 from anki_importer.notes import FolderNoteSource
 from anki_importer.settings_store import load_settings, save_settings
 from anki_importer.stage import Stage
@@ -36,6 +38,21 @@ def big_vault(tmp_path):
         "\n".join(f"[[note_{index:03d}]]" for index in range(400)), "utf-8"
     )
     return tmp_path
+
+
+class SlowGateway(FakeAnkiGateway):
+    """An Anki that can be held mid-import, so cancelling lands mid-flight."""
+
+    def __init__(self):
+        super().__init__()
+        self.gate = threading.Event()
+
+    def add_note(self, deck_name, card):
+        self.gate.wait(10)
+        return super().add_note(deck_name, card)
+
+    def release(self):
+        self.gate.set()
 
 
 class GatedNoteSource:
@@ -447,6 +464,118 @@ def config_file(tmp_path):
 
 @pytest.fixture
 def gateway():
-    from tests.test_import_run import FakeAnkiGateway
-
     return FakeAnkiGateway()
+
+
+class TestImportingFromTheApp:
+    async def _dry_run(self, app, pilot):
+        await pilot.press("r")
+        await app.workers.wait_for_complete()
+
+    async def test_the_app_offers_a_way_to_import_what_was_found(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test():
+            assert app.query_one("#submit")
+
+    async def test_importing_sends_every_card_to_the_chosen_deck(self, vault, gateway):
+        app = make_app(vault, deck_name="Maths")
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("s")
+            await app.workers.wait_for_complete()
+
+            imported = {card.front for card in gateway.notes.values()}
+            assert imported == {"root_note", "linked_note"}
+
+    async def test_importing_reports_what_anki_did(self, vault, gateway):
+        app = make_app(vault)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("s")
+            await app.workers.wait_for_complete()
+
+            assert app.query_one(CountBar).counts["added"] == 2
+
+    async def test_importing_first_makes_sure_anki_is_there(self, vault, gateway):
+        gateway.online = False
+        app = make_app(vault)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("s")
+            await app.workers.wait_for_complete()
+
+            assert "Anki" in app.query_one(NoticeBar).notice
+            assert gateway.notes == {}
+
+    async def test_importing_without_a_dry_run_first_says_so(self, vault, gateway):
+        app = make_app(vault)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await pilot.press("s")
+            await app.workers.wait_for_complete()
+
+            assert "dry run" in app.query_one(NoticeBar).notice
+            assert gateway.notes == {}
+
+    async def test_with_updating_on_an_existing_note_is_updated(self, vault, gateway):
+        gateway.existing_fronts["Default:root_note"] = 42
+        gateway.notes[42] = Card(front="root_note", back="stale")
+        app = make_app(vault, upsert=True)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("s")
+            await app.workers.wait_for_complete()
+
+            assert gateway.notes[42].back != "stale"
+            assert app.query_one(CountBar).counts["updated"] == 1
+
+    async def test_with_updating_off_an_existing_note_is_skipped(self, vault, gateway):
+        gateway.existing_fronts["Default:root_note"] = 42
+        app = make_app(vault, upsert=False)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("s")
+            await app.workers.wait_for_complete()
+
+            assert app.query_one(CountBar).counts["skipped"] == 1
+
+    async def test_a_note_anki_rejects_does_not_stop_the_rest(self, vault, gateway):
+        gateway.reject = {"root_note"}
+        app = make_app(vault)
+        app.gateway = gateway
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("s")
+            await app.workers.wait_for_complete()
+
+            counts = app.query_one(CountBar).counts
+            assert (counts["added"], counts["failed"]) == (1, 1)
+
+    async def test_cancelling_an_import_counts_only_what_was_sent(self, vault):
+        held = SlowGateway()
+        app = make_app(vault)
+        app.gateway = held
+
+        async with app.run_test() as pilot:
+            await self._dry_run(app, pilot)
+            await pilot.press("s")
+            await pilot.pause()
+            await pilot.press("escape")
+            held.release()
+            await app.workers.wait_for_complete()
+
+            assert app.query_one(CountBar).counts["added"] <= 1
+            assert app.stage is Stage.CANCELLED

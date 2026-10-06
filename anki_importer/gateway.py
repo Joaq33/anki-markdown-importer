@@ -79,7 +79,7 @@ class AnkiConnectGateway:
             result = self._call("version")
         except (requests.exceptions.RequestException, ValueError):
             return False
-        return isinstance(result, dict) and "error" not in result
+        return isinstance(result, dict) and not result.get("error")
 
     def note_id_for_front(self, deck_name: str, front: str) -> int | None:
         try:

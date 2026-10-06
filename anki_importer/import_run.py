@@ -199,6 +199,7 @@ class ImportRun:
                 skipped += 1
             else:
                 failed += 1
+            self.summary = RunSummary(added, updated, skipped, failed)
             yield CardSubmitted(card.front, outcome)
 
             if self.settings.throttle_seconds:

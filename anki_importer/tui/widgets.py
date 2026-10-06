@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from textual.widgets import DataTable, RichLog, Static
 
 from ..card import Card
+from ..import_run import RunSummary
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,21 @@ class CountBar(Static):
 
     def reset(self) -> None:
         self.tally(0, 0, 0)
+
+    def imported(self, summary: RunSummary) -> None:
+        """Show what Anki did: added, updated, skipped and failed."""
+        self.counts = {
+            "added": summary.added,
+            "updated": summary.updated,
+            "skipped": summary.skipped,
+            "failed": summary.failed,
+        }
+        parts = [
+            f"{value} {name}"
+            for name, value in self.counts.items()
+            if value or name == "added"
+        ]
+        self.update(", ".join(parts))
 
     def _text(self) -> str:
         found = self.counts["found"]
