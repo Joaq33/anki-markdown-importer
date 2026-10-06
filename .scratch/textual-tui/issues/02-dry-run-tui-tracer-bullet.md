@@ -8,16 +8,16 @@ is a dry run — nothing is sent anywhere and Anki does not need to be running.
 
 **Blocked by:** 01 — Prefactor: pure import core + AnkiConnect gateway.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The app launches full-screen and discovers notes and builds cards from the
+- [x] The app launches full-screen and discovers notes and builds cards from the
       chosen folder and root notes, listing each one with front, tags and skip
       state.
-- [ ] Discovery continues past the starting notes by following the wiki-links it
+- [x] Discovery continues past the starting notes by following the wiki-links it
       finds, each note appearing exactly once.
-- [ ] No card is submitted to Anki, and the app runs with AnkiConnect stopped.
-- [ ] Nothing is printed to the terminal outside the app's own screen.
-- [ ] Invalid input (missing folder, no root notes) shows a visible message
+- [x] No card is submitted to Anki, and the app runs with AnkiConnect stopped.
+- [x] Nothing is printed to the terminal outside the app's own screen.
+- [x] Invalid input (missing folder, no root notes) shows a visible message
       rather than a traceback.
-- [ ] The screen is driven by a failing test through Textual's test harness
+- [x] The screen is driven by a failing test through Textual's test harness
       before the UI is built.

@@ -18,6 +18,7 @@ from typing import Iterator
 from .card import Card
 from .card_builder import CardBuilder
 from .gateway import AnkiGateway, LinkResolution, SubmitOutcome
+from .stage import Stage
 from .notes import FolderNoteSource, NoteDiscovery, NoteFound, NoteMissing, NoteSource
 
 
@@ -33,6 +34,20 @@ class RunSettings:
     generate_links: bool = True
     # AnkiConnect does not like being hammered; a small pause per note is polite.
     throttle_seconds: float = 0.1
+
+
+@dataclass(frozen=True)
+class RunStarted:
+    """The pass that follows is the one that decides what this run does."""
+
+    stage: Stage
+
+
+@dataclass(frozen=True)
+class RunFinished:
+    """The pass is done; how it went is in `stage` plus the run's own totals."""
+
+    stage: Stage
 
 
 @dataclass(frozen=True)
@@ -79,7 +94,7 @@ class LinksResolved:
     resolution: LinkResolution
 
 
-BuildEvent = NoteDiscovered | NoteUnreadable | CardBuilt
+BuildEvent = RunStarted | RunFinished | NoteDiscovered | NoteUnreadable | CardBuilt
 SubmitEvent = CardSubmitted | RunSummary
 LinkEvent = LinkProgress | LinksResolved
 
@@ -137,6 +152,7 @@ class ImportRun:
 
     def build_cards(self) -> Iterator[BuildEvent]:
         """Walk the graph and build a card for every note it reaches."""
+        yield RunStarted(Stage.DISCOVERING)
         for event in self._discovery.discover(self.settings.root_notes):
             if self.cancelled:
                 return
@@ -155,6 +171,7 @@ class ImportRun:
             )
             self.cards.append(card)
             yield CardBuilt(card)
+        yield RunFinished(Stage.DISCOVERED)
 
     def submit(self, gateway: AnkiGateway) -> Iterator[SubmitEvent]:
         """Send every card to Anki, honouring the skip flag and upsert."""
