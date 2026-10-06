@@ -15,6 +15,7 @@ from anki_importer.notes import FolderNoteSource
 from anki_importer.settings_store import load_settings, save_settings
 from anki_importer.stage import Stage
 from anki_importer.tui.app import AnkiImporterApp
+from anki_importer.tui.screens import HelpScreen
 from anki_importer.tui.widgets import CardTable, CountBar, LogPanel, NoticeBar
 
 LINKED_PAIR = {
@@ -787,3 +788,123 @@ class TestResolvingLinks:
             await app.workers.wait_for_complete()
 
             assert app.stage is Stage.CANCELLED
+
+
+class TestHelp:
+    async def test_pressing_question_mark_explains_what_you_can_do(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.click(CardTable)
+            await pilot.press("?")
+            await pilot.pause()
+
+            assert isinstance(app.screen, HelpScreen)
+            explained = app.screen.explained_keys()
+            for key in ("r", "s", "e", "c", "l", "escape", "q"):
+                assert key in explained
+
+    async def test_the_help_button_explains_things_too(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.click("#help")
+            await pilot.pause()
+
+            assert isinstance(app.screen, HelpScreen)
+
+    async def test_every_keybinding_the_app_offers_is_explained_in_the_help(
+        self, vault
+    ):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.click(CardTable)
+            await pilot.press("?")
+            await pilot.pause()
+
+            explained = app.screen.explained_keys()
+            for binding in app.BINDINGS:
+                assert binding.key in explained, binding.key
+
+    async def test_the_help_closes_and_you_are_where_you_were(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.click(CardTable)
+            await pilot.press("?")
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+
+            assert not isinstance(app.screen, HelpScreen)
+
+    async def test_help_opens_from_the_settings_screen_too(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            await pilot.click("#config-help")
+            await pilot.pause()
+
+            assert isinstance(app.screen, HelpScreen)
+
+
+class TestSnapshots:
+    """What the screens look like, pixel for pixel.
+
+    These run against the repo's own fixture vault through a relative path,
+    so the snapshots hold on any machine and whatever else ran before them.
+    """
+
+    def _snapshot_app(self, tmp_path, **overrides):
+        app = AnkiImporterApp(config_path=str(tmp_path / "snap.toml"))
+        settings = {
+            "vault_path": "tests/test_notes",
+            "root_notes": ("root_note",),
+            "throttle_seconds": 0.0,
+        }
+        app.load_settings_from(RunSettings(**{**settings, **overrides}))
+        return app
+
+    def test_the_main_screen(self, snap_compare, tmp_path):
+        assert snap_compare(self._snapshot_app(tmp_path), terminal_size=(100, 30))
+
+    def test_the_settings_screen(self, snap_compare, tmp_path):
+        async def open_settings(pilot):
+            await pilot.press("c")
+            await pilot.pause()
+
+        assert snap_compare(
+            self._snapshot_app(tmp_path),
+            terminal_size=(100, 30),
+            run_before=open_settings,
+        )
+
+    def test_a_card_up_close(self, snap_compare, tmp_path):
+        app = self._snapshot_app(tmp_path)
+
+        async def open_first_card(pilot):
+            await pilot.press("r")
+            for _ in range(200):
+                if app.query_one(CardTable).fronts:
+                    break
+                await asyncio.sleep(0.05)
+            await pilot.press("enter")
+            await pilot.pause()
+
+        assert snap_compare(app, terminal_size=(100, 34), run_before=open_first_card)
+
+    def test_a_finished_dry_run(self, snap_compare, tmp_path):
+        app = self._snapshot_app(tmp_path)
+
+        async def finish_a_dry_run(pilot):
+            await pilot.press("r")
+            for _ in range(200):
+                if len(app.query_one(CardTable).fronts) == 3:
+                    break
+                await asyncio.sleep(0.05)
+            await pilot.pause()
+
+        assert snap_compare(app, terminal_size=(100, 30), run_before=finish_a_dry_run)

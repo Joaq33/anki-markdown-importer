@@ -4,7 +4,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, Label, Static, Switch
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Static, Switch
 
 from ..card import Card
 from ..import_run import RunSettings, parse_root_notes
@@ -57,6 +57,7 @@ class ConfigScreen(Screen[RunSettings | None]):
             with Horizontal(id="config-actions"):
                 yield Button("Save", id="config-save", variant="primary")
                 yield Button("Cancel", id="config-cancel")
+                yield Button("Help", id="config-help")
         yield Footer()
 
     def read_settings(self) -> RunSettings:
@@ -74,6 +75,8 @@ class ConfigScreen(Screen[RunSettings | None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "config-save":
             self.dismiss(self.read_settings())
+        elif event.button.id == "config-help":
+            self.app.push_screen(HelpScreen())
         else:
             self.dismiss(None)
 
@@ -116,7 +119,7 @@ class CardDetailScreen(Screen[tuple[int, Card] | None]):
             with Horizontal():
                 yield Label("Skip")
                 yield Switch(self.card.should_skip, id="detail-skip")
-            yield Label("Back, as Anki will show it")
+            yield Label("Back preview")
             with VerticalScroll(id="detail-back-scroll"):
                 yield Static(plain_preview(self.card.back), id="detail-back")
             with Horizontal(id="detail-actions"):
@@ -145,6 +148,62 @@ class CardDetailScreen(Screen[tuple[int, Card] | None]):
             self.dismiss((self.index, self.read_card()))
         else:
             self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+HELP_ENTRIES: tuple[tuple[str, str, str], ...] = (
+    ("r", "Run a dry run", "walk the vault, list every card it would import"),
+    ("s", "Import into Anki", "send the dry run's cards to the chosen deck"),
+    ("e", "Inspect a card", "open the highlighted row to check or fix it"),
+    ("enter", "Inspect a card", "same as e, straight from the table"),
+    ("c", "Settings", "vault, deck, roots, prefix, updating, links"),
+    ("l", "Show or hide the log", "the run's own log panel"),
+    ("escape", "Cancel or close", "stop the run in flight, or close a panel"),
+    ("?", "This help", "whenever you are not typing in a field"),
+    ("q", "Quit", "leave the app"),
+)
+
+
+class HelpScreen(Screen[None]):
+    """What you can press, and what it does."""
+
+    TITLE = "Help"
+    CSS = """
+    HelpScreen { align: center middle; }
+    #help-box { width: 78; height: auto; max-height: 90%; border: solid $accent; padding: 1 2; }
+    #help-keys { height: auto; max-height: 18; }
+    #help-actions { height: auto; padding: 1 0 0 0; }
+    """
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("?", "close", "Close"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Vertical(id="help-box"):
+            yield DataTable(id="help-keys")
+            with Horizontal(id="help-actions"):
+                yield Button("Close", id="help-close", variant="primary")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        table = self.query_one("#help-keys", DataTable)
+        table.add_column("Key", key="key")
+        table.add_column("Does", key="does")
+        table.add_column("When", key="when")
+        table.cursor_type = "row"
+        for key, does, when in HELP_ENTRIES:
+            table.add_row(key, does, when)
+
+    def explained_keys(self) -> tuple[str, ...]:
+        """Every key this panel claims to explain."""
+        return tuple(key for key, _, _ in HELP_ENTRIES)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
 
     def action_close(self) -> None:
         self.dismiss(None)

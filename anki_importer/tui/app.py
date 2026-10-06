@@ -37,7 +37,7 @@ from ..notes import FolderNoteSource, NoteSource
 from ..stage import Stage
 from ..logging_setup import remove_sink, take_over_terminal
 from ..settings_store import DEFAULT_FILE_NAME, load_settings, save_settings
-from .screens import CardDetailScreen, ConfigScreen
+from .screens import CardDetailScreen, ConfigScreen, HelpScreen
 from .widgets import CardTable, CountBar, LogPanel, NoticeBar
 
 
@@ -46,20 +46,23 @@ class AnkiImporterApp(App[None]):
 
     TITLE = "Anki importer"
     CSS = """
-    #controls { height: auto; padding: 0 1; }
-    #controls Label { width: 14; padding: 1 1 0 0; }
+    #controls { height: auto; padding: 0 2; }
+    #controls .field { height: 3; margin-bottom: 1; }
+    #controls Label { width: 14; padding: 1 1 0 0; color: $text-muted; }
     #vault-path, #root-notes { width: 1fr; }
-    #buttons { height: auto; padding: 1 0 0 0; }
-    #notice { height: auto; padding: 1 1 0 1; }
-    #counts { height: auto; padding: 0 1; }
-    #progress { height: 1; }
-    #cards { height: 1fr; }
-    #log { height: 10; border-top: solid $accent; }
+    #buttons { height: 3; }
+    #buttons Button { margin-right: 1; }
+    #notice { height: auto; min-height: 2; padding: 1 2 0 2; text-style: bold; }
+    #counts { height: 1; padding: 0 2; color: $text-muted; }
+    #progress { height: 1; margin: 0 2; }
+    #cards { height: 1fr; margin-top: 1; border-top: solid $primary; }
+    #log { height: 6; border-top: solid $primary; }
     """
     BINDINGS = [
         Binding("r", "run", "Run"),
         Binding("s", "submit", "Import"),
         Binding("e", "inspect", "Inspect"),
+        Binding("?", "help", "Help"),
         Binding("escape", "cancel", "Cancel"),
         Binding("l", "log_panel", "Logs"),
         Binding("c", "config", "Settings"),
@@ -97,6 +100,7 @@ class AnkiImporterApp(App[None]):
             with Horizontal(id="buttons"):
                 yield Button("Run dry run", id="run", variant="primary")
                 yield Button("Import into Anki", id="submit", variant="success")
+                yield Button("Help", id="help")
         yield NoticeBar(Stage.IDLE.message, id="notice")
         yield CountBar(id="counts")
         yield ProgressBar(id="progress")
@@ -108,6 +112,12 @@ class AnkiImporterApp(App[None]):
         self._log_sink = take_over_terminal(self._queue_log_line)
         self.set_interval(0.05, self._drain_log_queue)
         self.sync_inputs()
+        # Determinate and empty: nothing is running, and a pulsing bar would
+        # lie about that (as well as never rendering the same frame twice).
+        self.query_one(ProgressBar).update(total=1, progress=0)
+        # The table owns the keyboard, so single-key shortcuts work the moment
+        # the app opens. Typing in a field takes focus there; Tab brings it back.
+        self.query_one(CardTable).focus()
 
     def _queue_log_line(self, line: str) -> None:
         """Called by loguru, on whichever thread logged."""
@@ -191,6 +201,17 @@ class AnkiImporterApp(App[None]):
     def _on_submit_pressed(self) -> None:
         self.start_submit()
 
+    @on(Button.Pressed, "#help")
+    def _on_help_pressed(self) -> None:
+        self.action_help()
+
+    def action_help(self) -> None:
+        """Explain what you can press, or close the explanation."""
+        if isinstance(self.screen, HelpScreen):
+            self.pop_screen()
+        else:
+            self.push_screen(HelpScreen())
+
     def action_config(self) -> None:
         """Open the settings screen, and keep what is saved there."""
         self.push_screen(ConfigScreen(self.settings), self._on_settings_saved)
@@ -210,7 +231,10 @@ class AnkiImporterApp(App[None]):
             noun = "note" if found == 1 else "notes"
             self.query_one(NoticeBar).report(f"Found {found} {noun}", problems)
         else:
-            self.announce(Stage.DISCOVERED, problems or ["Nothing to import"])
+            self.announce(
+                Stage.DISCOVERED,
+                problems or ["No notes found - check the root note names"],
+            )
 
     # -- running a dry run ---------------------------------------------------
 
@@ -447,8 +471,8 @@ class AnkiImporterApp(App[None]):
         self.import_run.cancel()
         self.write_log("Cancelled. The notes found so far are still here.")
         self.announce(Stage.CANCELLED)
-        self.query_one(ProgressBar).total = None
-        self.query_one(ProgressBar).progress = 0
+        found = len(self.import_run.cards)
+        self.query_one(ProgressBar).update(total=max(found, 1), progress=found)
 
     def action_log_panel(self) -> None:
         """Show or hide the run's log."""
