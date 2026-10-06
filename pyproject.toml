@@ -11,3 +11,35 @@ dependencies = [
     "python-frontmatter>=1.1.0",
     "requests>=2.32.4",
 ]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-textual-snapshot>=1.0.0",
+    "textual>=8.2.8",
+    "types-requests>=2.33.0.20260906",
+]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["anki_importer", "main.py"]
+strict = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["frontmatter.*", "loguru.*", "markdown_it.*", "icecream.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+# Test bodies are deliberately terse; their behaviour is what matters, not types.
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
