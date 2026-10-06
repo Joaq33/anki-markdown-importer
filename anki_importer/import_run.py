@@ -227,7 +227,7 @@ class ImportRun:
             def rewrite(match: re.Match[str]) -> str:
                 nonlocal resolved, unresolved
                 alias, target = match.group(1), match.group(2)
-                target_id = gateway.note_id_for_front(self.settings.deck_name, target)
+                target_id = gateway.find_note_by_front(target)
                 if target_id is not None:
                     resolved += 1
                     return f"[{alias}|nid{target_id}]"

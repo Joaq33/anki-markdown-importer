@@ -44,6 +44,12 @@ class FakeAnkiGateway:
     def note_id_for_front(self, deck_name: str, front: str) -> int | None:
         return self.existing_fronts.get(f"{deck_name}:{front}")
 
+    def find_note_by_front(self, front: str) -> int | None:
+        for key, note_id in self.existing_fronts.items():
+            if key.split(":", 1)[1] == front:
+                return note_id
+        return None
+
     def add_note(self, deck_name: str, card: Card) -> SubmitOutcome:
         if card.front in self.reject:
             return SubmitOutcome.FAILED
@@ -305,3 +311,23 @@ class TestLinkResolution:
         events = list(run.resolve_links(gateway))
 
         assert not any(isinstance(event, LinksResolved) for event in events)
+
+class TestResolveLinksParity:
+    def test_resolution_finds_a_target_even_when_it_lives_in_another_deck(
+        self, vault
+    ):
+        gateway = FakeAnkiGateway()
+        run = make_run(vault, root_notes=("root_note",))
+        list(run.build_cards())
+        list(run.submit(gateway))
+        gateway.existing_fronts.clear()
+        gateway.existing_fronts["Other:linked_note"] = 555
+
+        list(run.resolve_links(gateway))
+
+        assert run.links.resolved == 1
+        assert run.links.unresolved_targets == ("root_note",)
+        root = next(
+            card for card in gateway.notes.values() if card.front == "root_note"
+        )
+        assert "[linked_note|nid555]" in root.back

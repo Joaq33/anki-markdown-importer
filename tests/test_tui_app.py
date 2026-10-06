@@ -908,3 +908,47 @@ class TestSnapshots:
             await pilot.pause()
 
         assert snap_compare(app, terminal_size=(100, 30), run_before=finish_a_dry_run)
+
+
+class TestReviewFixes:
+    async def test_changing_the_folder_on_the_main_screen_is_remembered(
+        self, vault, config_file
+    ):
+        app = make_app(vault)
+        app.config_path = config_file
+
+        async with app.run_test() as pilot:
+            app.query_one("#vault-path", Input).value = str(vault)
+            app.query_one("#root-notes", Input).value = "root_note, linked_note"
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+
+            assert load_settings(config_file).root_notes == (
+                "root_note",
+                "linked_note",
+            )
+
+    async def test_help_opens_from_a_card_up_close(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.click("#detail-help")
+            await pilot.pause()
+
+            assert isinstance(app.screen, HelpScreen)
+
+    async def test_opening_a_card_from_an_empty_table_does_nothing(self, vault):
+        app = make_app(vault)
+
+        async with app.run_test() as pilot:
+            await pilot.press("e")
+            await pilot.pause()
+
+            assert not isinstance(app.screen, HelpScreen)
+            from anki_importer.tui.screens import CardDetailScreen
+
+            assert not isinstance(app.screen, CardDetailScreen)

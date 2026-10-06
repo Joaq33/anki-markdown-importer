@@ -38,8 +38,6 @@ class NoteSource(Protocol):
     def read(self, name: str) -> str:
         """The text of the note called `name` (its stem, extension optional)."""
 
-    def exists(self, name: str) -> bool: ...
-
 
 class FolderNoteSource:
     """Reads notes from one flat folder, matching names case-insensitively."""
@@ -70,14 +68,6 @@ class FolderNoteSource:
         raise FileNotFoundError(
             f"Markdown file '{name}' not found in directory '{self.folder_path}'."
         )
-
-    def exists(self, name: str) -> bool:
-        try:
-            self.read(name)
-        except (FileNotFoundError, IOError):
-            return False
-        return True
-
 
 class NoteDiscovery:
     """Walks the wiki-link graph breadth first from a set of root notes."""

@@ -4,27 +4,16 @@ from enum import Enum
 
 
 class Stage(Enum):
-    """Where an import has got to."""
+    """Where an import has got to. `message` is the line shown while here."""
 
-    IDLE = ("idle", "Nothing imported yet. Choose a folder and root notes, then run.")
-    DISCOVERING = ("discovering", "Looking through your notes...")
-    DISCOVERED = ("discovered", "Found no notes")
-    IMPORTING = ("importing", "Importing into Anki...")
-    IMPORTED = ("imported", "Nothing imported yet")
-    RESOLVING = ("resolving", "Resolving links between notes...")
-    RESOLVED = ("resolved", "Nothing imported yet")
-    CANCELLED = ("cancelled", "Stopped. The notes found so far are still here.")
-    DONE = ("done", "Done")
+    IDLE = "Nothing imported yet. Choose a folder and root notes, then run."
+    DISCOVERING = "Looking through your notes..."
+    DISCOVERED = "Found notes"
+    IMPORTING = "Importing into Anki..."
+    IMPORTED = "Imported"
+    RESOLVING = "Resolving links between notes..."
+    RESOLVED = "Links resolved"
+    CANCELLED = "Stopped. The notes found so far are still here."
 
-    def __init__(self, key: str, message: str) -> None:
-        self.key = key
+    def __init__(self, message: str) -> None:
         self.message = message
-
-    def with_count(self, count: int, noun: str = "note") -> str:
-        """The message for this stage, with a count filled in."""
-        if count == 0 and self is Stage.DISCOVERED:
-            return "Found no notes to import"
-        return f"{self.message} ({count} {noun}{'' if count == 1 else 's'})"
-
-    def __str__(self) -> str:
-        return self.key

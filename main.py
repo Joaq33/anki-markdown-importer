@@ -10,21 +10,7 @@ from anki_importer import Card, ImportRun, RunSettings
 from anki_importer.facade import AnkiHelper
 from anki_importer.logging_setup import configure_file_logging
 
-__all__ = ["AnkiHelper", "Card", "ImportRun", "RunSettings", "main", "run_import"]
-
-
-def run_import(settings: RunSettings) -> None:
-    """Import from the command line, without a UI."""
-    from anki_importer.gateway import AnkiConnectGateway
-
-    run = ImportRun(settings)
-    gateway = AnkiConnectGateway()
-    for _ in run.build_cards():
-        pass
-    for event in run.submit(gateway):
-        pass
-    for _ in run.resolve_links(gateway):
-        pass
+__all__ = ["AnkiHelper", "Card", "ImportRun", "RunSettings", "main"]
 
 
 def main() -> int:

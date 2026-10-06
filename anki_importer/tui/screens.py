@@ -125,6 +125,7 @@ class CardDetailScreen(Screen[tuple[int, Card] | None]):
             with Horizontal(id="detail-actions"):
                 yield Button("Apply", id="detail-apply", variant="primary")
                 yield Button("Close", id="detail-close")
+                yield Button("Help", id="detail-help")
         yield Footer()
 
     def read_card(self) -> Card:
@@ -146,6 +147,8 @@ class CardDetailScreen(Screen[tuple[int, Card] | None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "detail-apply":
             self.dismiss((self.index, self.read_card()))
+        elif event.button.id == "detail-help":
+            self.app.push_screen(HelpScreen())
         else:
             self.dismiss(None)
 

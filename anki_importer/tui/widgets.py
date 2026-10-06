@@ -53,9 +53,10 @@ class CardTable(DataTable[str]):
 
     def highlighted_index(self) -> int | None:
         """Which card the cursor is on, if the table lists anything."""
-        if not self._rows:
+        positions = list(self._rows)
+        if not 0 <= self.cursor_row < len(positions):
             return None
-        return list(self._rows)[self.cursor_row]
+        return positions[self.cursor_row]
 
     def add_card(self, card: Card) -> CardRow:
         """Append a card at the end, keeping its position stable for edits."""
@@ -118,6 +119,19 @@ class CountBar(Static):
     def reset(self) -> None:
         self.tally(0, 0, 0)
 
+    @staticmethod
+    def text_for(summary: RunSummary) -> str:
+        """What Anki did, in one line: the counts that are not zero."""
+        counts = (
+            ("added", summary.added),
+            ("updated", summary.updated),
+            ("skipped", summary.skipped),
+            ("failed", summary.failed),
+        )
+        return ", ".join(
+            f"{value} {name}" for name, value in counts if value or name == "added"
+        )
+
     def imported(self, summary: RunSummary) -> None:
         """Show what Anki did: added, updated, skipped and failed."""
         self.counts = {
@@ -126,12 +140,7 @@ class CountBar(Static):
             "skipped": summary.skipped,
             "failed": summary.failed,
         }
-        parts = [
-            f"{value} {name}"
-            for name, value in self.counts.items()
-            if value or name == "added"
-        ]
-        self.update(", ".join(parts))
+        self.update(self.text_for(summary))
 
     def _text(self) -> str:
         found = self.counts["found"]

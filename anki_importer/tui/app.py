@@ -15,7 +15,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, ProgressBar
 
 from ..card import Card
-from ..gateway import AnkiConnectGateway, AnkiGateway
+from ..gateway import AnkiConnectGateway, AnkiGateway, LinkResolution
 from ..import_run import (
     BuildEvent,
     CardBuilt,
@@ -245,6 +245,7 @@ class AnkiImporterApp(App[None]):
         """Discover and build every card, without sending anything to Anki."""
         settings = self.read_settings_from_inputs()
         self.settings = settings
+        save_settings(settings, self.config_path)
         try:
             source: NoteSource = self.source_factory(settings.vault_path)
         except FileNotFoundError as error:
@@ -286,13 +287,13 @@ class AnkiImporterApp(App[None]):
             case NoteUnreadable(name):
                 self.write_log(f"WARNING no note called '{name}': a link points at nothing")
                 self.problems.append(f"no note called '{name}'")
-                self._tally()
+                self._refresh_counts()
             case CardBuilt(card):
                 self.query_one(CardTable).add_card(card)
-                self._tally()
+                self._refresh_counts()
 
-    def _tally(self) -> None:
-        """Keep the counts and the progress bar in step with what we have."""
+    def _refresh_counts(self) -> None:
+        """Keep the counts in step with what the run has found."""
         counts = self.query_one(CountBar)
         counts.tally(
             found=len(self.cards),
@@ -378,21 +379,15 @@ class AnkiImporterApp(App[None]):
         if run is not None and run.cancelled:
             self.announce(Stage.CANCELLED)
             return
-        parts = ", ".join(
-            f"{value} {name}"
-            for name, value in (
-                ("added", summary.added),
-                ("updated", summary.updated),
-                ("skipped", summary.skipped),
-                ("failed", summary.failed),
-            )
-            if value
-        )
+        parts = CountBar.text_for(summary)
         noun = "note" if summary.processed == 1 else "notes"
         problems = [f"{summary.failed} failed to import"] if summary.failed else []
         self.stage = Stage.IMPORTED
         self.problems = problems
-        self.query_one(NoticeBar).report(f"Imported {summary.processed} {noun}: {parts}", problems)
+        tally = CountBar.text_for(summary)
+        self.query_one(NoticeBar).report(
+            f"Imported {summary.processed} {noun}: {tally}", problems
+        )
 
     def _begin_resolution(self) -> None:
         """Announce the link pass, which follows an import in the same run."""
@@ -409,12 +404,15 @@ class AnkiImporterApp(App[None]):
                     f"{Stage.RESOLVING.message} ({done} so far)"
                 )
             case LinksResolved(resolution):
-                self._finish_links(resolution.resolved, resolution.unresolved, resolution.unresolved_targets)
+                self._finish_links(resolution)
 
-    def _finish_links(
-        self, resolved: int, unresolved: int, targets: tuple[str, ...]
-    ) -> None:
+    def _finish_links(self, resolution: LinkResolution) -> None:
         """Say what the link pass did, naming every target it could not find."""
+        resolved, unresolved, targets = (
+            resolution.resolved,
+            resolution.unresolved,
+            resolution.unresolved_targets,
+        )
         progress = self.query_one(ProgressBar)
         progress.total = 1
         progress.progress = 1

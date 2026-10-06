@@ -43,6 +43,13 @@ class AnkiGateway(Protocol):
     def is_available(self) -> bool:
         """Whether AnkiConnect answered."""
 
+    def find_note_by_front(self, front: str) -> int | None:
+        """The id of a note whose front matches, in any deck.
+
+        Link targets are looked up globally, the way the original importer did:
+        the note a link points at may live outside the deck being imported.
+        """
+
     def note_id_for_front(self, deck_name: str, front: str) -> int | None:
         """The id of the note in this deck whose front matches, if there is one."""
 
@@ -56,6 +63,11 @@ class AnkiGateway(Protocol):
     def note_back(self, note_id: int) -> str: ...
 
     def replace_note_back(self, note_id: int, back: str) -> bool: ...
+
+
+def escape(term: str) -> str:
+    """Quote a search term so quotes and backslashes survive Anki's parser."""
+    return term.replace("\\", "\\\\").replace('"', '\\"')
 
 
 class AnkiConnectGateway:
@@ -81,9 +93,20 @@ class AnkiConnectGateway:
             return False
         return isinstance(result, dict) and not result.get("error")
 
+    def find_note_by_front(self, front: str) -> int | None:
+        try:
+            result = self._call("findNotes", query=f'Front:"{escape(front)}"')
+        except (requests.exceptions.RequestException, ValueError):
+            return None
+        found: Sequence[Any] = result.get("result") or []
+        return int(found[0]) if found else None
+
     def note_id_for_front(self, deck_name: str, front: str) -> int | None:
         try:
-            result = self._call("findNotes", query=f'deck:"{deck_name}" front:"{front}"')
+            result = self._call(
+                "findNotes",
+                query=f'deck:"{escape(deck_name)}" front:"{escape(front)}"',
+            )
         except (requests.exceptions.RequestException, ValueError):
             return None
         found: Sequence[Any] = result.get("result") or []
@@ -116,6 +139,7 @@ class AnkiConnectGateway:
                 note={
                     "id": note_id,
                     "deckName": deck_name,
+                    "modelName": "Basic",
                     "fields": {"Back": card.back},
                     "tags": sorted(card.tags),
                 },

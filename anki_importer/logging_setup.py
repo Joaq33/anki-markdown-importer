@@ -50,10 +50,3 @@ def take_over_terminal(sink: LogSink, level: str = "INFO") -> int:
     """
     log.remove()
     return add_sink(sink, level=level)
-
-
-def add_stdout_sink(level: str = "INFO") -> int:
-    """For running headless, where the terminal is ours to use."""
-    import sys
-
-    return log.add(sink=sys.stdout, level=level, format="{message}")
